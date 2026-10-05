@@ -31,3 +31,33 @@ def test_api_status_disabled_when_stat_false(client):
     r = client.get("/api/status")
     # STAT defaults from env; in CI often unset so may be True. Just ensure JSON response.
     assert r.content_type == "application/json"
+
+
+def test_tautulli_viewers_returns_per_user_stats(client, monkeypatch):
+    """Viewer endpoint exposes names and play counts without leaking service errors."""
+    from routes import api
+
+    def fake_stats(rating_key):
+        assert rating_key == "viewer-test-1"
+        return [{
+            "user_id": 42,
+            "friendly_name": "Example Viewer",
+            "total_plays": 2,
+            "total_time": 7200,
+        }]
+
+    monkeypatch.setattr(api.tautulli, "get_item_user_stats", fake_stats)
+    r = client.post("/api/tautulli-viewers", json={"rating_keys": ["viewer-test-1"]})
+
+    assert r.status_code == 200
+    assert r.get_json() == {
+        "viewer-test-1": {
+            "rating_key": "viewer-test-1",
+            "viewers": [{
+                "user_id": 42,
+                "name": "Example Viewer",
+                "total_plays": 2,
+                "total_time": 7200,
+            }],
+        }
+    }

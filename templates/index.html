@@ -239,6 +239,11 @@
   td.cell-library,
   td.cell-requested { min-width: 80px; max-width: 180px; }
 
+  td.cell-viewers { min-width: 160px; max-width: 260px; }
+  .viewer-row { display: flex; justify-content: space-between; gap: 0.75rem; }
+  .viewer-row + .viewer-row { margin-top: 0.25rem; }
+  .viewer-plays { color: var(--text-dim); white-space: nowrap; }
+
   input[type="checkbox"] {
     width: 16px;
     height: 16px;
@@ -621,12 +626,13 @@
           <th>File</th>
           <th class="sortable" data-sort="file_size">Size</th>
           <th class="sortable" data-sort="library_name">Library</th>
+          <th>Played By</th>
           <th class="sortable" data-sort="requested_by">Requested By</th>
         </tr>
       </thead>
       <tbody id="mediaBody">
         <tr>
-          <td colspan="10">
+          <td colspan="11">
             <div class="empty-state"><p>Select a type (Movies, TV Shows, or Music) and click Load.</p></div>
           </td>
         </tr>
@@ -679,6 +685,7 @@
   let sortDir = 'asc';
   let lastItems = [];
   let lastOsrInfo = null;
+  let lastViewerInfo = null;
   let seerrDisplayName = 'Seerr';
   let libraryLoaded = false;
 
@@ -777,7 +784,7 @@
   }
 
   // --- Media ---
-  function renderTable(items, overseerrInfo) {
+  function renderTable(items, overseerrInfo, viewerInfo) {
     const body = $('#mediaBody');
     body.innerHTML = items.map(item => {
       const rk = item.rating_key;
@@ -811,6 +818,21 @@
       } else {
         reqByHtml = '<span class="cell-loading">loading...</span>';
       }
+      const viewer = viewerInfo ? viewerInfo[String(rk)] : null;
+      let playedByHtml = '<span class="cell-loading">loading...</span>';
+      if (currentLibType === 'artist') {
+        playedByHtml = '<span class="dim">—</span>';
+      } else if (viewerInfo) {
+        if (viewer && viewer.error) {
+          playedByHtml = '<span class="dim">Unavailable</span>';
+        } else if (viewer && viewer.viewers && viewer.viewers.length) {
+          playedByHtml = viewer.viewers.map(v =>
+            `<div class="viewer-row"><span>${esc(v.name)}</span><span class="viewer-plays">${Number(v.total_plays) || 0} play${Number(v.total_plays) === 1 ? '' : 's'}</span></div>`
+          ).join('');
+        } else {
+          playedByHtml = '<span class="dim">—</span>';
+        }
+      }
       const libraryName = item.library_name != null ? esc(item.library_name) : '—';
       const sectionId = item.section_id != null ? esc(String(item.section_id)) : '';
       const itemGuid = (item.guid != null && item.guid !== '') ? String(item.guid) : '';
@@ -825,6 +847,7 @@
         <td class="cell-nowrap">${fileBadge}</td>
         <td class="dim cell-nowrap">${fileSize}</td>
         <td class="dim cell-library">${libraryName}</td>
+        <td class="dim cell-viewers">${playedByHtml}</td>
         <td class="dim cell-requested">${reqByHtml}</td>
       </tr>`;
     }).join('');
@@ -852,7 +875,7 @@
   async function loadMedia() {
     if (!currentLib) return;
     const body = $('#mediaBody');
-    body.innerHTML = '<tr><td colspan="10"><div class="table-loading"><span class="spinner"></span> Loading...</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="11"><div class="table-loading"><span class="spinner"></span> Loading...</div></td></tr>';
     try {
       const search = $('#searchInput').value.trim();
       const requestorSearch = $('#requestorSearchInput').value.trim();
@@ -907,7 +930,7 @@
       }
 
       if (!items.length) {
-        body.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p>No items found.</p></div></td></tr>';
+        body.innerHTML = '<tr><td colspan="11"><div class="empty-state"><p>No items found.</p></div></td></tr>';
         $('#paginationBar').style.display = 'none';
         libraryLoaded = true;
         $('#searchWrap').style.display = '';
@@ -918,9 +941,10 @@
       $('#searchWrap').style.display = '';
       lastItems = items;
       lastOsrInfo = null;
+      lastViewerInfo = null;
       updateSortHeaders();
 
-      renderTable(items, null);
+      renderTable(items, null, null);
 
       const totalPages = Math.ceil(totalCount / PAGE_SIZE);
       $('#pageInfo').textContent = `Page ${page + 1} of ${totalPages} (${totalCount} items)`;
@@ -933,7 +957,8 @@
       // Fetch Seerr requestor info (skip for artist libraries); then show Requested by search box
       if (currentLibType === 'artist') {
         lastOsrInfo = {};
-        renderTable(items, {});
+        lastViewerInfo = {};
+        renderTable(items, {}, {});
       } else {
         const ratingKeys = items.map(i => String(i.rating_key));
         try {
@@ -947,6 +972,18 @@
           });
           const osrInfo = await parseJsonResponse(osrRes);
           lastOsrInfo = osrInfo;
+          let viewerInfo = {};
+          try {
+            const viewerRes = await fetch('/api/tautulli-viewers', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rating_keys: ratingKeys }),
+            });
+            viewerInfo = await parseJsonResponse(viewerRes);
+          } catch {
+            viewerInfo = {};
+          }
+          lastViewerInfo = viewerInfo;
           let displayItems = isClientSort
             ? sortItemsByRequestedBy(items, osrInfo, sortDir)
             : items;
@@ -961,16 +998,17 @@
             $('#pageInfo').textContent = `Requested by "${requestorSearch}": ${displayItems.length} match(es) on this page`;
             $('#paginationBar').style.display = 'none';
           }
-          renderTable(displayItems, osrInfo);
+          renderTable(displayItems, osrInfo, viewerInfo);
           updateSelectionBar();
           $('#requestorSearchWrap').style.display = '';
         } catch {
           lastOsrInfo = {};
-          renderTable(items, {});
+          lastViewerInfo = {};
+          renderTable(items, {}, {});
         }
       }
     } catch (e) {
-      body.innerHTML = `<tr><td colspan="10"><div class="empty-state"><p>Error: ${esc(e.message)}</p></div></td></tr>`;
+      body.innerHTML = `<tr><td colspan="11"><div class="empty-state"><p>Error: ${esc(e.message)}</p></div></td></tr>`;
       toast('Failed to load media: ' + e.message, 'error');
     }
   }
@@ -1372,7 +1410,7 @@
       if (col === 'requested_by' && lastItems.length && lastOsrInfo) {
         updateSortHeaders();
         const sorted = sortItemsByRequestedBy(lastItems, lastOsrInfo, sortDir);
-        renderTable(sorted, lastOsrInfo);
+        renderTable(sorted, lastOsrInfo, lastViewerInfo);
         updateSelectionBar();
         return;
       }

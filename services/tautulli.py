@@ -152,6 +152,12 @@ def get_metadata(rating_key) -> dict:
     return tautulli_get("get_metadata", {"rating_key": rating_key})
 
 
+def get_item_user_stats(rating_key) -> list:
+    """Get aggregate play statistics for each Tautulli user of an item."""
+    data = tautulli_get("get_item_user_stats", {"rating_key": rating_key})
+    return data if isinstance(data, list) else []
+
+
 def delete_tautulli_history(rating_key) -> int:
     """Delete all Tautulli play history for a rating key."""
     data = tautulli_get("get_history", {

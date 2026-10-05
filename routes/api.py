@@ -1,5 +1,7 @@
 """API routes."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+import time
 
 import requests
 from flask import Blueprint, jsonify, request
@@ -19,6 +21,10 @@ from services import lidarr, overseerr, plex as plex_svc, radarr, sonarr, tautul
 from utils.ids import extract_ids
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+_VIEWER_CACHE_TTL = 300
+_viewer_cache = {}
+_viewer_cache_lock = Lock()
 
 @api_bp.route("/debug")
 def api_debug():
@@ -464,6 +470,69 @@ def api_overseerr_info():
             for fut in as_completed(futures):
                 res = fut.result()
                 info[res["rating_key"]] = res
+        return jsonify(info)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _cached_tautulli_viewers(rating_key):
+    """Return cached per-user item stats, refreshing at most every five minutes."""
+    key = str(rating_key)
+    now = time.monotonic()
+    with _viewer_cache_lock:
+        cached = _viewer_cache.get(key)
+        if cached and now - cached[0] < _VIEWER_CACHE_TTL:
+            return cached[1]
+
+    viewers = tautulli.get_item_user_stats(rating_key)
+    with _viewer_cache_lock:
+        _viewer_cache[key] = (now, viewers)
+    return viewers
+
+
+@api_bp.route("/tautulli-viewers", methods=["POST"])
+def api_tautulli_viewers():
+    """Batch-return aggregate Tautulli play statistics by item and user.
+
+    Expects JSON: {"rating_keys": ["123", "456", ...]}
+    """
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        return jsonify({"error": "Invalid JSON body"}), 400
+
+    raw_keys = body.get("rating_keys", [])
+    if not isinstance(raw_keys, list):
+        return jsonify({"error": "rating_keys must be a list"}), 400
+    rating_keys = list(dict.fromkeys(str(key) for key in raw_keys if key is not None))[:100]
+
+    def _lookup(rating_key):
+        result = {"rating_key": rating_key, "viewers": []}
+        try:
+            for row in _cached_tautulli_viewers(rating_key):
+                if not isinstance(row, dict):
+                    continue
+                name = row.get("friendly_name") or row.get("username")
+                if not name:
+                    continue
+                result["viewers"].append({
+                    "user_id": row.get("user_id"),
+                    "name": str(name),
+                    "total_plays": row.get("total_plays", 0),
+                    "total_time": row.get("total_time", 0),
+                })
+        except Exception:
+            # Do not expose service errors or credentials through the API.
+            result["error"] = "Tautulli viewer statistics unavailable"
+        return result
+
+    try:
+        info = {}
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_lookup, key): key for key in rating_keys}
+            for future in as_completed(futures):
+                result = future.result()
+                info[result["rating_key"]] = result
         return jsonify(info)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
