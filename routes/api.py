@@ -4,7 +4,7 @@ from threading import Lock
 import time
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from config import (
     DEBUG,
@@ -520,6 +520,7 @@ def api_tautulli_viewers():
                     "name": str(name),
                     "total_plays": row.get("total_plays", 0),
                     "total_time": row.get("total_time", 0),
+                    "last_played": row.get("last_played") or row.get("last_watched"),
                 })
         except Exception:
             # Do not expose service errors or credentials through the API.
@@ -562,6 +563,41 @@ def api_item_ids():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/item-poster")
+def api_item_poster():
+    """Proxy a Plex poster for a library item without exposing the Plex token."""
+    rating_key = request.args.get("rating_key")
+    if not rating_key:
+        return jsonify({"error": "rating_key required"}), 400
+    if not PLEX_URL or not PLEX_TOKEN:
+        return jsonify({"error": "Plex not configured"}), 404
+    try:
+        meta = tautulli.get_metadata(rating_key)
+        if isinstance(meta, list) and meta:
+            meta = meta[0]
+        if isinstance(meta, dict) and isinstance(meta.get("metadata"), dict):
+            meta = meta["metadata"]
+        thumb = meta.get("thumb") if isinstance(meta, dict) else None
+        if not thumb:
+            return jsonify({"error": "Poster unavailable"}), 404
+        poster_url = thumb if str(thumb).startswith("http") else f"{PLEX_URL.rstrip('/')}/{str(thumb).lstrip('/')}"
+        response = requests.get(
+            poster_url,
+            params={"X-Plex-Token": PLEX_TOKEN},
+            timeout=15,
+        )
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "image/jpeg")
+        return Response(
+            response.content,
+            status=200,
+            mimetype=content_type.split(";", 1)[0],
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+    except Exception:
+        return jsonify({"error": "Poster unavailable"}), 404
 
 
 @api_bp.route("/refresh-plex", methods=["POST"])

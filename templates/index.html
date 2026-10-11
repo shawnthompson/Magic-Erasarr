@@ -307,6 +307,80 @@
     box-shadow: 0 20px 60px rgba(0,0,0,0.4);
   }
 
+  .detail-modal {
+    max-width: 760px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .detail-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .detail-poster {
+    background: var(--bg);
+    border-radius: var(--radius);
+    display: none;
+    flex: 0 0 96px;
+    height: 144px;
+    object-fit: cover;
+    width: 96px;
+  }
+
+  .detail-poster.visible { display: block; }
+  .detail-modal-heading { flex: 1; }
+
+  .detail-modal-header h2 { margin-bottom: 0.25rem; }
+  .detail-subtitle { color: var(--text-dim); font-size: 0.875rem; }
+  .detail-close { font-size: 1.25rem; line-height: 1; padding: 0.25rem 0.5rem; }
+
+  .detail-section {
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+    margin-top: 1rem;
+  }
+
+  .detail-section h3 {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.65rem;
+    text-transform: uppercase;
+  }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.65rem 1rem;
+  }
+
+  .detail-field label {
+    color: var(--text-dim);
+    display: block;
+    font-size: 0.72rem;
+    margin-bottom: 0.15rem;
+  }
+
+  .detail-field span { overflow-wrap: anywhere; }
+  .detail-list { margin: 0; max-height: 220px; }
+  .detail-empty { color: var(--text-dim); font-size: 0.875rem; }
+
+  .item-detail-trigger {
+    background: none;
+    border: 0;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-align: left;
+  }
+
+  .item-detail-trigger:hover { color: var(--accent); text-decoration: underline; }
+
   .modal h2 {
     font-size: 1.1rem;
     margin-bottom: 0.75rem;
@@ -620,7 +694,6 @@
           <th class="check-col"><input type="checkbox" id="checkAll" title="Select all" /></th>
           <th class="sortable" data-sort="sort_title">Title</th>
           <th class="sortable" data-sort="year">Year</th>
-          <th class="sortable" data-sort="added_at">Added</th>
           <th class="sortable sort-asc" data-sort="last_played">Last Played</th>
           <th class="sortable" data-sort="play_count">Play Count</th>
           <th>File</th>
@@ -632,7 +705,7 @@
       </thead>
       <tbody id="mediaBody">
         <tr>
-          <td colspan="11">
+          <td colspan="10">
             <div class="empty-state"><p>Select a type (Movies, TV Shows, or Music) and click Load.</p></div>
           </td>
         </tr>
@@ -663,6 +736,23 @@
   </div>
 </div>
 
+<!-- Read-only item details modal -->
+<div class="modal-overlay" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+  <div class="modal detail-modal">
+    <div class="detail-modal-header">
+      <img class="detail-poster" id="detailModalPoster" alt="" />
+      <div class="detail-modal-heading">
+        <h2 id="detailModalTitle">Item details</h2>
+        <div class="detail-subtitle" id="detailModalSubtitle"></div>
+      </div>
+      <button class="btn-ghost detail-close" id="detailCloseBtn" type="button" aria-label="Close item details">&times;</button>
+    </div>
+    <div id="detailModalBody">
+      <div class="table-loading"><span class="spinner"></span> Loading details...</div>
+    </div>
+  </div>
+</div>
+
 <!-- Toasts -->
 <div class="toast-container" id="toasts"></div>
 <div class="toast-overlay" id="toastOverlay"></div>
@@ -686,6 +776,7 @@
   let lastItems = [];
   let lastOsrInfo = null;
   let lastViewerInfo = null;
+  const debugEnabled = {{ 'true' if debug else 'false' }};
   let seerrDisplayName = 'Seerr';
   let libraryLoaded = false;
 
@@ -793,9 +884,6 @@
       const lastPlayed = item.last_played
         ? new Date(item.last_played * 1000).toLocaleDateString()
         : 'Never';
-      const addedAt = item.added_at
-        ? new Date(item.added_at * 1000).toLocaleDateString()
-        : '—';
       // Tautulli: movies use file_size; shows often have no file_size until media info cache is refreshed
       const rawSize = getFileSize(item);
       const fileSize = rawSize > 0 ? formatBytes(rawSize) : '—';
@@ -839,9 +927,8 @@
 
       return `<tr class="${selClass}" data-rk="${rk}" data-section-id="${sectionId}" data-guid="${esc(itemGuid)}">
         <td class="check-col"><input type="checkbox" class="row-check" data-rk="${rk}" data-title="${esc(item.title)}" data-year="${item.year || ''}" data-guid="${esc(itemGuid)}" ${isChecked} /></td>
-        <td class="title-cell">${esc(item.title)}<span class="year">${item.year ? '(' + item.year + ')' : ''}</span></td>
+        <td class="title-cell"><button class="item-detail-trigger" type="button" data-rk="${esc(String(rk))}" aria-label="Show details for ${esc(item.title)}">${esc(item.title)}</button><span class="year">${item.year ? '(' + item.year + ')' : ''}</span></td>
         <td class="dim cell-nowrap">${item.year || '—'}</td>
-        <td class="dim cell-nowrap">${addedAt}</td>
         <td class="dim cell-nowrap">${lastPlayed}</td>
         <td class="dim cell-nowrap">${item.play_count || 0}</td>
         <td class="cell-nowrap">${fileBadge}</td>
@@ -851,6 +938,124 @@
         <td class="dim cell-requested">${reqByHtml}</td>
       </tr>`;
     }).join('');
+  }
+
+  function detailField(label, value) {
+    return `<div class="detail-field"><label>${esc(label)}</label><span>${value || '<span class="dim">—</span>'}</span></div>`;
+  }
+
+  function detailValue(value) {
+    return value == null || value === '' ? '' : esc(String(value));
+  }
+
+  function formatDuration(seconds) {
+    const total = Number(seconds);
+    if (!Number.isFinite(total) || total <= 0) return '—';
+    const minutes = Math.round(total / 60);
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  }
+
+  function detailDate(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(Number(timestamp) * 1000);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+  }
+
+  function renderItemDetails(item, osr, viewer, ids) {
+    const rawSize = getFileSize(item);
+    const fileStatus = rawSize > 0 ? 'On Disk' : (currentLibType === 'movie' ? 'Missing or unavailable' : 'Unavailable');
+    const viewers = viewer && Array.isArray(viewer.viewers) ? viewer.viewers : [];
+    const viewerHtml = viewer && viewer.error
+      ? '<div class="detail-empty">Viewer statistics unavailable.</div>'
+      : viewers.length
+        ? `<ul class="detail-list">${viewers.map(v => `<li><strong>${esc(v.name || 'Unknown user')}</strong> — ${Number(v.total_plays) || 0} play${Number(v.total_plays) === 1 ? '' : 's'}, ${formatDuration(v.total_time)} total${v.last_played ? `, last played ${esc(detailDate(v.last_played))}` : ''}</li>`).join('')}</ul>`
+        : '<div class="detail-empty">No recorded viewer statistics.</div>';
+
+    const technicalSection = debugEnabled ? `
+      <section class="detail-section">
+        <h3>Matching identifiers</h3>
+        <div class="detail-grid">
+          ${[
+            detailField('Plex/Tautulli rating key', detailValue(item.rating_key)),
+            detailField('Plex GUID', detailValue(ids && (ids.guid || item.guid))),
+            detailField('TMDB ID', detailValue(ids && ids.tmdb_id)),
+            detailField('IMDb ID', detailValue(ids && ids.imdb_id)),
+            detailField('TVDB ID', detailValue(ids && ids.tvdb_id)),
+          ].join('')}
+        </div>
+      </section>` : '';
+
+    $('#detailModalBody').innerHTML = `
+      <section class="detail-section" style="border-top:0; padding-top:0; margin-top:0;">
+        <h3>Library</h3>
+        <div class="detail-grid">
+          ${detailField('Library', detailValue(item.library_name))}
+          ${detailField('Added', detailValue(detailDate(item.added_at)))}
+          ${detailField('File status', detailValue(fileStatus))}
+          ${detailField('File size', rawSize > 0 ? esc(formatBytes(rawSize)) : '')}
+          ${detailField('Last played', item.last_played ? esc(detailDate(item.last_played)) : 'Never')}
+          ${detailField('Play count', detailValue(item.play_count || 0))}
+        </div>
+      </section>
+      <section class="detail-section">
+        <h3>Media</h3>
+        <div class="detail-grid">
+          ${detailField('Container', detailValue(item.container))}
+          ${detailField('Video', detailValue(item.video_codec))}
+          ${detailField('Resolution', detailValue(item.video_resolution))}
+          ${detailField('Audio', detailValue(item.audio_codec))}
+          ${detailField('Audio channels', detailValue(item.audio_channels))}
+          ${detailField('Bitrate', item.bitrate ? esc(`${item.bitrate} kbps`) : '')}
+        </div>
+      </section>
+      <section class="detail-section">
+        <h3>Seerr request</h3>
+        <div class="detail-grid">
+          ${detailField('Requested by', osr && osr.requested_by ? esc(osr.requested_by) : '')}
+        </div>
+      </section>
+      <section class="detail-section">
+        <h3>Tautulli viewers</h3>
+        ${viewerHtml}
+      </section>
+      ${technicalSection}`;
+  }
+
+  let detailRequestNumber = 0;
+  async function openItemDetails(ratingKey) {
+    const item = lastItems.find(candidate => String(candidate.rating_key) === String(ratingKey));
+    if (!item) return;
+    const requestNumber = ++detailRequestNumber;
+    const osr = lastOsrInfo ? lastOsrInfo[String(ratingKey)] : null;
+    const viewer = lastViewerInfo ? lastViewerInfo[String(ratingKey)] : null;
+    $('#detailModalTitle').textContent = item.title || 'Item details';
+    $('#detailModalSubtitle').textContent = item.year ? String(item.year) : '';
+    const poster = $('#detailModalPoster');
+    poster.classList.remove('visible');
+    poster.removeAttribute('src');
+    poster.alt = item.title ? `${item.title} poster` : 'Poster';
+    poster.onerror = () => poster.classList.remove('visible');
+    poster.onload = () => poster.classList.add('visible');
+    poster.src = '/api/item-poster?rating_key=' + encodeURIComponent(ratingKey);
+    $('#detailModalBody').innerHTML = '<div class="table-loading"><span class="spinner"></span> Loading details...</div>';
+    $('#detailModal').classList.add('visible');
+    $('#detailCloseBtn').focus();
+
+    let ids = null;
+    if (debugEnabled) {
+      try {
+        const response = await fetch('/api/item-ids?rating_key=' + encodeURIComponent(ratingKey));
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        ids = data;
+      } catch {
+        ids = {};
+      }
+    }
+    if (requestNumber === detailRequestNumber) renderItemDetails(item, osr, viewer, ids);
   }
 
   function updateSortHeaders() {
@@ -875,7 +1080,7 @@
   async function loadMedia() {
     if (!currentLib) return;
     const body = $('#mediaBody');
-    body.innerHTML = '<tr><td colspan="11"><div class="table-loading"><span class="spinner"></span> Loading...</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="10"><div class="table-loading"><span class="spinner"></span> Loading...</div></td></tr>';
     try {
       const search = $('#searchInput').value.trim();
       const requestorSearch = $('#requestorSearchInput').value.trim();
@@ -930,7 +1135,7 @@
       }
 
       if (!items.length) {
-        body.innerHTML = '<tr><td colspan="11"><div class="empty-state"><p>No items found.</p></div></td></tr>';
+        body.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p>No items found.</p></div></td></tr>';
         $('#paginationBar').style.display = 'none';
         libraryLoaded = true;
         $('#searchWrap').style.display = '';
@@ -1008,7 +1213,7 @@
         }
       }
     } catch (e) {
-      body.innerHTML = `<tr><td colspan="11"><div class="empty-state"><p>Error: ${esc(e.message)}</p></div></td></tr>`;
+      body.innerHTML = `<tr><td colspan="10"><div class="empty-state"><p>Error: ${esc(e.message)}</p></div></td></tr>`;
       toast('Failed to load media: ' + e.message, 'error');
     }
   }
@@ -1423,6 +1628,24 @@
   $('#removeBtn').addEventListener('click', removeSelected);
   $('#cancelBtn').addEventListener('click', () => $('#confirmModal').classList.remove('visible'));
   $('#confirmBtn').addEventListener('click', confirmRemove);
+
+  $('#mediaBody').addEventListener('click', (event) => {
+    const trigger = event.target.closest('.item-detail-trigger');
+    if (trigger) openItemDetails(trigger.dataset.rk);
+  });
+
+  function closeItemDetails() {
+    detailRequestNumber++;
+    $('#detailModal').classList.remove('visible');
+  }
+
+  $('#detailCloseBtn').addEventListener('click', closeItemDetails);
+  $('#detailModal').addEventListener('click', (event) => {
+    if (event.target === $('#detailModal')) closeItemDetails();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && $('#detailModal').classList.contains('visible')) closeItemDetails();
+  });
 
   $('#topAlertDismiss').addEventListener('click', () => $('#topAlert').classList.remove('visible'));
 

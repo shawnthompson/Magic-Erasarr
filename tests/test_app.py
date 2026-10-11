@@ -16,6 +16,14 @@ def test_index_includes_version(client):
     assert b"v1." in r.data  # e.g. v1.3.0
 
 
+def test_index_includes_read_only_item_details_modal(client):
+    """The library view includes the detail modal and title trigger."""
+    r = client.get("/")
+    assert r.status_code == 200
+    assert b'id="detailModal"' in r.data
+    assert b'class="item-detail-trigger"' in r.data
+
+
 def test_api_libraries_returns_json(client):
     """/api/libraries returns JSON (error when no Tautulli is ok)."""
     r = client.get("/api/libraries")
@@ -55,9 +63,17 @@ def test_tautulli_viewers_returns_per_user_stats(client, monkeypatch):
             "rating_key": "viewer-test-1",
             "viewers": [{
                 "user_id": 42,
-                "name": "Example Viewer",
-                "total_plays": 2,
-                "total_time": 7200,
-            }],
+            "name": "Example Viewer",
+            "total_plays": 2,
+            "total_time": 7200,
+            "last_played": None,
+        }],
         }
     }
+
+
+def test_item_poster_requires_a_rating_key(client):
+    """Poster proxy rejects requests without an item key."""
+    r = client.get("/api/item-poster")
+    assert r.status_code == 400
+    assert r.get_json() == {"error": "rating_key required"}
