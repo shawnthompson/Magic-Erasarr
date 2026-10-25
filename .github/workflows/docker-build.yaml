@@ -2,6 +2,7 @@ name: Build and Push Docker Image
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
     paths:
       - "app.py"
@@ -12,8 +13,7 @@ on:
       - "docker/**"
       - "tests/**"
     branches:
-      - master
-      - dev
+      - main
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: |
@@ -44,6 +44,7 @@ jobs:
     name: Build multi-arch image
     runs-on: ubuntu-latest
     needs: test
+    if: github.event_name != 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -69,7 +70,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6

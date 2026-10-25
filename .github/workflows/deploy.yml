@@ -1,0 +1,63 @@
+name: Deploy to daboss
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magic-erasarr-production
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+  deploy:
+    name: Deploy production
+    runs-on: [self-hosted, linux, x64, daboss, magic-erasarr]
+    needs: test
+    timeout-minutes: 20
+
+    steps:
+      - name: Update the production checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C /mnt/Sites/Magic-Erasarr fetch --prune origin main
+          git -C /mnt/Sites/Magic-Erasarr reset --hard origin/main
+
+      - name: Build and restart Magic-Erasarr
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose=(sudo -n docker compose --profile all --env-file /home/shawn/docker/.env -f /home/shawn/docker/docker-compose-daboss.yml)
+          "${compose[@]}" build magic-erasarr
+          "${compose[@]}" up -d --no-deps magic-erasarr
+
+      - name: Verify container
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n docker inspect --format '{{.State.Status}}' magic-erasarr | grep -qx running
