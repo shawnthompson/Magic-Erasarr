@@ -13,7 +13,7 @@ def _bool_env(name: str, default: bool = False) -> bool:
 DEBUG = _bool_env("DEBUG", False)
 STAT = _bool_env("STAT", True)
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 GITHUB_REPO = "https://github.com/cbodden/Magic-Erasarr"
 
 

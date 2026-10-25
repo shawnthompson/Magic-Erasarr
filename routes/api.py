@@ -539,6 +539,60 @@ def api_tautulli_viewers():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/tautulli-episodes")
+def api_tautulli_episodes():
+    """Return TV seasons, episodes, and per-user play stats for a show."""
+    rating_key = request.args.get("rating_key")
+    if not rating_key:
+        return jsonify({"error": "rating_key required"}), 400
+
+    def episode_viewers(episode):
+        viewers = []
+        try:
+            for row in _cached_tautulli_viewers(episode["rating_key"]):
+                if not isinstance(row, dict):
+                    continue
+                name = row.get("friendly_name") or row.get("username")
+                if name:
+                    viewers.append({
+                        "name": str(name),
+                        "total_plays": row.get("total_plays", 0),
+                    })
+        except Exception:
+            pass
+        episode["viewers"] = viewers
+        return episode
+
+    try:
+        show_data = tautulli.get_children_metadata(rating_key, "show")
+        seasons = []
+        for season in show_data.get("children_list", []) if isinstance(show_data, dict) else []:
+            season_key = season.get("rating_key") if isinstance(season, dict) else None
+            if not season_key:
+                continue
+            season_data = tautulli.get_children_metadata(season_key, "season")
+            episodes = []
+            children = season_data.get("children_list", []) if isinstance(season_data, dict) else []
+            for episode in children:
+                if not isinstance(episode, dict) or not episode.get("rating_key"):
+                    continue
+                episodes.append({
+                    "rating_key": str(episode["rating_key"]),
+                    "title": episode.get("title") or episode.get("full_title") or "Untitled episode",
+                    "episode_number": episode.get("media_index") or episode.get("episode_num") or episode.get("index"),
+                    "play_count": episode.get("play_count", 0),
+                    "last_played": episode.get("last_played"),
+                })
+            seasons.append({
+                "season_number": season.get("parent_index") or season.get("index"),
+                "title": season.get("title") or season.get("full_title") or "Season",
+                "episodes": [episode_viewers(episode) for episode in episodes],
+            })
+        return jsonify({"rating_key": str(rating_key), "seasons": seasons})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/item-ids")
 def api_item_ids():
     """Return guid and extracted IDs for a rating_key (for remove flow when library item has no guid)."""

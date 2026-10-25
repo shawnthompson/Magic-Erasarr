@@ -369,6 +369,16 @@
   .detail-list { margin: 0; max-height: 220px; }
   .detail-empty { color: var(--text-dim); font-size: 0.875rem; }
 
+  .episode-breakdown { display: grid; gap: 0.75rem; }
+  .episode-season { background: var(--bg); border-radius: var(--radius); overflow: hidden; }
+  .episode-season h4 { padding: 0.6rem 0.75rem; font-size: 0.8rem; color: var(--text-dim); }
+  .episode-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .episode-table th, .episode-table td { padding: 0.45rem 0.6rem; border-top: 1px solid var(--border); text-align: left; }
+  .episode-table th { color: var(--text-dim); font-weight: 500; }
+  .episode-table .episode-number { width: 2.5rem; color: var(--text-dim); }
+  .episode-table .episode-plays { white-space: nowrap; text-align: right; }
+  .episode-viewer { display: block; color: var(--text-dim); }
+
   .item-detail-trigger {
     background: none;
     border: 0;
@@ -987,6 +997,13 @@
           ].join('')}
         </div>
       </section>` : '';
+    const episodeSection = currentLibType === 'show' ? `
+      <section class="detail-section">
+        <h3>Episodes</h3>
+        <div id="episodeBreakdown" class="episode-breakdown">
+          <div class="table-loading"><span class="spinner"></span> Loading episodes...</div>
+        </div>
+      </section>` : '';
 
     $('#detailModalBody').innerHTML = `
       <section class="detail-section" style="border-top:0; padding-top:0; margin-top:0;">
@@ -1021,7 +1038,47 @@
         <h3>Tautulli viewers</h3>
         ${viewerHtml}
       </section>
+      ${episodeSection}
       ${technicalSection}`;
+  }
+
+  function renderEpisodeBreakdown(data) {
+    const container = $('#episodeBreakdown');
+    if (!container) return;
+    const seasons = data && Array.isArray(data.seasons) ? data.seasons : [];
+    if (!seasons.length || !seasons.some(season => season.episodes && season.episodes.length)) {
+      container.innerHTML = '<div class="detail-empty">No episode details were returned by Tautulli.</div>';
+      return;
+    }
+    container.innerHTML = seasons.filter(season => season.episodes && season.episodes.length).map(season => `
+      <div class="episode-season">
+        <h4>${esc(season.title || `Season ${season.season_number || ''}`)}</h4>
+        <table class="episode-table">
+          <thead><tr><th>Episode</th><th>Title</th><th>Viewers</th><th class="episode-plays">Plays</th></tr></thead>
+          <tbody>${season.episodes.map(episode => {
+            const viewers = Array.isArray(episode.viewers) ? episode.viewers : [];
+            const viewerHtml = viewers.length
+              ? viewers.map(v => `<span class="episode-viewer">${esc(v.name)} (${Number(v.total_plays) || 0})</span>`).join('')
+              : '<span class="dim">—</span>';
+            const plays = Number(episode.play_count) || 0;
+            return `<tr><td class="episode-number">${esc(episode.episode_number || '—')}</td><td>${esc(episode.title || 'Untitled episode')}</td><td>${viewerHtml}</td><td class="episode-plays">${plays}</td></tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`).join('');
+  }
+
+  async function loadEpisodeBreakdown(ratingKey, requestNumber) {
+    try {
+      const response = await fetch('/api/tautulli-episodes?rating_key=' + encodeURIComponent(ratingKey));
+      const data = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (requestNumber === detailRequestNumber) renderEpisodeBreakdown(data);
+    } catch {
+      if (requestNumber === detailRequestNumber) {
+        const container = $('#episodeBreakdown');
+        if (container) container.innerHTML = '<div class="detail-empty">Episode statistics unavailable.</div>';
+      }
+    }
   }
 
   let detailRequestNumber = 0;
@@ -1055,7 +1112,10 @@
         ids = {};
       }
     }
-    if (requestNumber === detailRequestNumber) renderItemDetails(item, osr, viewer, ids);
+    if (requestNumber === detailRequestNumber) {
+      renderItemDetails(item, osr, viewer, ids);
+      if (currentLibType === 'show') loadEpisodeBreakdown(item.rating_key, requestNumber);
+    }
   }
 
   function updateSortHeaders() {

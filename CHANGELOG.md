@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.0] - 2026-10-25
+
+### Added
+
+- **TV episode viewer breakdown** — TV show details now load seasons, episodes, per-episode play counts, and viewer play counts from Tautulli.
+
 ## [1.6.0] - 2026-02-16
 
 ### Added

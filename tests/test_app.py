@@ -77,3 +77,45 @@ def test_item_poster_requires_a_rating_key(client):
     r = client.get("/api/item-poster")
     assert r.status_code == 400
     assert r.get_json() == {"error": "rating_key required"}
+
+
+def test_tautulli_episodes_returns_episode_viewers(client, monkeypatch):
+    """TV episode details include per-episode play counts and viewers."""
+    from routes import api
+
+    def fake_children(rating_key, media_type):
+        if media_type == "show":
+            return {"children_list": [{"rating_key": "season-1", "index": 1, "title": "Season 1"}]}
+        assert rating_key == "season-1"
+        return {"children_list": [{
+            "rating_key": "episode-1",
+            "media_index": 1,
+            "title": "Pilot",
+            "play_count": 3,
+            "last_played": 1700000000,
+        }]}
+
+    monkeypatch.setattr(api.tautulli, "get_children_metadata", fake_children)
+    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [{
+        "friendly_name": "Example Viewer",
+        "total_plays": 3,
+    }])
+
+    r = client.get("/api/tautulli-episodes?rating_key=show-1")
+
+    assert r.status_code == 200
+    assert r.get_json() == {
+        "rating_key": "show-1",
+        "seasons": [{
+            "season_number": 1,
+            "title": "Season 1",
+            "episodes": [{
+                "rating_key": "episode-1",
+                "title": "Pilot",
+                "episode_number": 1,
+                "play_count": 3,
+                "last_played": 1700000000,
+                "viewers": [{"name": "Example Viewer", "total_plays": 3}],
+            }],
+        }],
+    }

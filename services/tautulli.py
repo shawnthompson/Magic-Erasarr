@@ -152,6 +152,14 @@ def get_metadata(rating_key) -> dict:
     return tautulli_get("get_metadata", {"rating_key": rating_key})
 
 
+def get_children_metadata(rating_key, media_type: str) -> dict:
+    """Get metadata for the direct children of a show or season."""
+    return tautulli_get(
+        "get_children_metadata",
+        {"rating_key": rating_key, "media_type": media_type},
+    )
+
+
 def get_item_user_stats(rating_key) -> list:
     """Get aggregate play statistics for each Tautulli user of an item."""
     data = tautulli_get("get_item_user_stats", {"rating_key": rating_key})
