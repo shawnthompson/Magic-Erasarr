@@ -1,6 +1,6 @@
 # Production image: runs gunicorn (WSGI), not the Flask dev server.
 # Set DEBUG=true and STAT=true in env (e.g. docker-compose) as needed.
-FROM python:3.12-alpine
+FROM python:3.14-alpine
 
 ARG VERSION=1.6.0
 LABEL maintainer="cbodden" \
