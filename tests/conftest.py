@@ -10,6 +10,9 @@ def app():
     os.environ.setdefault("TAUTULLI_API_KEY", "")
     os.environ.setdefault("OVERSEERR_API_KEY", "")
     from app import create_app
+    from routes import api
+    api._tautulli_users_cache = None
+    api._requester_user_cache.clear()
     app = create_app()
     app.config["TESTING"] = True
     return app
