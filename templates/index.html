@@ -920,6 +920,47 @@
     $('#loadBtn').disabled = !$('#librarySelect').value;
   }
 
+  function syncDashboardUrl() {
+    const params = new URLSearchParams();
+    if (currentLibType) params.set('type', currentLibType);
+    const libraryFilter = $('#libraryFilter').value.trim();
+    const search = $('#searchInput').value.trim();
+    const requestorSearch = $('#requestorSearchInput').value.trim();
+    if (libraryFilter) params.set('library', libraryFilter);
+    if (search) params.set('search', search);
+    if (requestorSearch) params.set('requestor', requestorSearch);
+    if (page > 0) params.set('page', String(page));
+    if (sortColumn !== 'last_played') params.set('sort', sortColumn);
+    if (sortDir !== 'asc') params.set('dir', sortDir);
+    const threshold = $('#watchedThresholdInput').value.trim();
+    if (threshold) params.set('threshold', threshold);
+    if (new URLSearchParams(window.location.search).get('test_calculating') === '1') {
+      params.set('test_calculating', '1');
+    }
+    const query = params.toString();
+    window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
+  }
+
+  function restoreDashboardState() {
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get('type');
+    if (!['movie', 'show', 'artist'].includes(type)) return false;
+    currentLib = `combined:${type}`;
+    currentLibType = type;
+    $('#librarySelect').value = currentLib;
+    $('#loadBtn').disabled = false;
+    $('#libraryFilter').value = params.get('library') || '';
+    $('#searchInput').value = params.get('search') || '';
+    $('#requestorSearchInput').value = params.get('requestor') || '';
+    $('#watchedThresholdInput').value = params.get('threshold') || '';
+    const restoredPage = Number.parseInt(params.get('page') || '0', 10);
+    page = Number.isInteger(restoredPage) && restoredPage >= 0 ? restoredPage : 0;
+    const allowedSorts = ['sort_title', 'year', 'added_at', 'last_played', 'play_count', 'file_size', 'requested_by', 'library_name'];
+    sortColumn = allowedSorts.includes(params.get('sort')) ? params.get('sort') : 'last_played';
+    sortDir = params.get('dir') === 'desc' ? 'desc' : 'asc';
+    return true;
+  }
+
   // --- Media ---
   function requesterStatusLabel(status) {
     return ({
@@ -1231,6 +1272,7 @@
 
   async function loadMedia() {
     if (!currentLib) return;
+    syncDashboardUrl();
     const body = $('#mediaBody');
     body.innerHTML = '<tr><td colspan="10"><div class="table-loading"><span class="spinner"></span> Loading...</div></td></tr>';
     try {
@@ -1690,11 +1732,13 @@
     $('#searchInput').value = '';
     $('#requestorSearchWrap').style.display = 'none';
     $('#requestorSearchInput').value = '';
+    syncDashboardUrl();
   });
 
   $('#libraryFilter').addEventListener('change', function() {
     if (libraryLoaded && currentLib) {
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     }
   });
@@ -1708,24 +1752,27 @@
     lastOsrInfo = null;
     updateSelectionBar();
     updateSortHeaders();
+    syncDashboardUrl();
     loadMedia();
   });
 
   $('#searchInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && currentLib) {
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     }
   });
   $('#requestorSearchInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && currentLib) {
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     }
   });
 
-  $('#prevBtn').addEventListener('click', () => { if (page > 0) { page--; loadMedia(); } });
-  $('#nextBtn').addEventListener('click', () => { page++; loadMedia(); });
+  $('#prevBtn').addEventListener('click', () => { if (page > 0) { page--; syncDashboardUrl(); loadMedia(); } });
+  $('#nextBtn').addEventListener('click', () => { page++; syncDashboardUrl(); loadMedia(); });
 
   document.addEventListener('change', (e) => {
     if (e.target.classList.contains('row-check')) {
@@ -1790,10 +1837,12 @@
         const sorted = sortItemsByRequestedBy(lastItems, lastOsrInfo, sortDir);
         renderTable(sorted, lastOsrInfo, lastViewerInfo, lastShowSummaryInfo);
         updateSelectionBar();
+        syncDashboardUrl();
         return;
       }
 
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     });
   });
@@ -1826,6 +1875,7 @@
     await initStatusBar();
     checkStatus();
     loadLibraries();
+    if (restoreDashboardState()) loadMedia();
   })();
 })();
 </script>
