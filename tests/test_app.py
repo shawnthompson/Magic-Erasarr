@@ -72,6 +72,166 @@ def test_tautulli_viewers_returns_per_user_stats(client, monkeypatch):
     }
 
 
+def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
+    """Requester status is matched per item and uses the 90% completion boundary."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://123"]})
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [
+            {"requestedBy": {"user_id": 1, "displayName": "Alice"}},
+            {"requestedBy": {"user_id": 2, "displayName": "Bob"}},
+        ]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [
+        {"rating_key": "movie-1", "user_id": 1, "percent_complete": 89},
+        {"rating_key": "movie-1", "user_id": 2, "percent_complete": 90},
+        # A stale duplicate rating key must not affect this item's status.
+        {"rating_key": "old-movie-1", "user_id": 1, "percent_complete": 100},
+    ])
+
+    r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-1", "movie-1"]})
+
+    assert r.status_code == 200
+    assert r.get_json()["movie-1"]["requesters"] == [
+        {"name": "Alice", "status": "partial"},
+        {"name": "Bob", "status": "completed"},
+    ]
+
+
+def test_tautulli_show_history_queries_episode_scope(monkeypatch):
+    """Show history uses the grandparent key and episode media type."""
+    from services import tautulli
+
+    calls = []
+
+    def fake_get(command, params):
+        calls.append((command, params))
+        return {"data": [{"rating_key": "episode-1"}]}
+
+    monkeypatch.setattr(tautulli, "tautulli_get", fake_get)
+
+    assert tautulli.get_item_history("show-1", "show") == [{"rating_key": "episode-1"}]
+    assert calls == [(
+        "get_history",
+        {"grandparent_rating_key": "show-1", "media_type": "episode", "length": -1},
+    )]
+
+
+def test_overseerr_info_matches_watched_show_episode_history(client, monkeypatch):
+    """Episode history under a show marks that show's requester as watched."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://127"]})
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [{"requestedBy": {"user_id": 6, "displayName": "Frank"}}]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [{
+        "rating_key": "episode-1",
+        "grandparent_rating_key": "show-1",
+        "user_id": 6,
+        "percent_complete": 100,
+    }])
+
+    r = client.post(
+        "/api/overseerr-info",
+        json={"rating_keys": ["show-1"], "media_type": "show"},
+    )
+
+    assert r.status_code == 200
+    assert r.get_json()["show-1"]["requesters"] == [
+        {"name": "Frank", "status": "completed"}
+    ]
+
+
+def test_overseerr_info_handles_empty_history(client, monkeypatch):
+    """A requester with no history is explicitly marked as not watched."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://124"]})
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [{"requestedBy": {"user_id": 3, "displayName": "Casey"}}]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [])
+
+    r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-empty"]})
+
+    assert r.get_json()["movie-empty"]["requesters"] == [
+        {"name": "Casey", "status": "not_watched"}
+    ]
+
+
+def test_overseerr_info_preserves_requester_when_history_fails(client, monkeypatch):
+    """A Tautulli error does not hide Seerr's requester identity."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://125"]})
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [{"requestedBy": {"user_id": 4, "displayName": "Dana"}}]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-error"]})
+
+    assert r.status_code == 200
+    assert r.get_json()["movie-error"]["requesters"] == [
+        {"name": "Dana", "status": "unavailable"}
+    ]
+
+
+def test_overseerr_info_caches_seerr_and_history_lookups(client, monkeypatch):
+    """Repeated page loads reuse the short-lived per-item caches."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://126"]})
+    calls = {"seerr": 0, "history": 0}
+
+    def fake_media(*_):
+        calls["seerr"] += 1
+        return {"mediaInfo": {"requests": [{"requestedBy": {"user_id": 5, "displayName": "Evan"}}]}}
+
+    def fake_history(*_):
+        calls["history"] += 1
+        return []
+
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", fake_media)
+    monkeypatch.setattr(api.tautulli, "get_item_history", fake_history)
+
+    for _ in range(2):
+        r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-cache", "movie-cache"]})
+        assert r.status_code == 200
+
+    assert calls == {"seerr": 1, "history": 1}
+
+
+def test_library_combined_preserves_requested_page(client, monkeypatch):
+    """Combined libraries return the requested slice after merging and sorting."""
+    from routes import api
+
+    monkeypatch.setattr(api.tautulli, "get_tautulli_libraries", lambda: [{
+        "section_id": "1", "section_name": "Movies", "section_type": "movie"
+    }])
+    monkeypatch.setattr(api.tautulli, "get_library_media_response", lambda *args, **kwargs: {
+        "result": "success",
+        "data": {"recordsTotal": 3, "data": [
+            {"rating_key": "movie-1", "sort_title": "Alpha"},
+            {"rating_key": "movie-2", "sort_title": "Bravo"},
+            {"rating_key": "movie-3", "sort_title": "Charlie"},
+        ]},
+    })
+
+    r = client.get("/api/library/combined?type=movie&start=1&length=1&order_column=sort_title")
+
+    assert r.status_code == 200
+    assert [item["rating_key"] for item in r.get_json()["data"]] == ["movie-2"]
+    assert r.get_json()["recordsTotal"] == 3
+
+
 def test_item_poster_requires_a_rating_key(client):
     """Poster proxy rejects requests without an item key."""
     r = client.get("/api/item-poster")

@@ -25,6 +25,13 @@ api_bp = Blueprint("api", __name__, url_prefix="/api")
 _VIEWER_CACHE_TTL = 300
 _viewer_cache = {}
 _viewer_cache_lock = Lock()
+_REQUESTER_CACHE_TTL = 300
+_requester_cache = {}
+_requester_cache_lock = Lock()
+_HISTORY_CACHE_TTL = 300
+_history_cache = {}
+_history_cache_lock = Lock()
+_WATCHED_THRESHOLD = 90
 _SUMMARY_CACHE_TTL = 300
 _summary_cache = {}
 _summary_cache_lock = Lock()
@@ -465,13 +472,96 @@ def api_overseerr_info():
     except Exception:
         return jsonify({"error": "Invalid JSON body"}), 400
     rating_keys = body.get("rating_keys", [])
+    if not isinstance(rating_keys, list):
+        return jsonify({"error": "rating_keys must be a list"}), 400
+    rating_keys = list(dict.fromkeys(str(key) for key in rating_keys if key is not None))[:100]
     media_type = body.get("media_type", "movie")
 
     if not OVERSEERR_API_KEY:
         return jsonify({})
 
+    def _cached_requester_media(tmdb_id):
+        key = (str(tmdb_id), str(media_type))
+        now = time.monotonic()
+        with _requester_cache_lock:
+            cached = _requester_cache.get(key)
+            if cached and now - cached[0] < _REQUESTER_CACHE_TTL:
+                return cached[1]
+        media = overseerr.overseerr_find_media(tmdb_id, media_type)
+        with _requester_cache_lock:
+            _requester_cache[key] = (now, media)
+        return media
+
+    def _cached_item_history(rk):
+        key = (str(rk), str(media_type))
+        now = time.monotonic()
+        with _history_cache_lock:
+            cached = _history_cache.get(key)
+            if cached and now - cached[0] < _HISTORY_CACHE_TTL:
+                return cached[1]
+        history = tautulli.get_item_history(rk, media_type)
+        with _history_cache_lock:
+            _history_cache[key] = (now, history)
+        return history
+
+    def _identity_values(user):
+        values = {
+            str(user.get(field) or "").strip().casefold()
+            for field in ("displayName", "display_name", "plexUsername", "username", "email")
+        }
+        return {value for value in values if value}
+
+    def _history_matches_requester(row, user):
+        if not isinstance(row, dict):
+            return False
+        requester_id = user.get("user_id")
+        history_id = row.get("user_id")
+        if requester_id is not None and history_id is not None and str(requester_id) == str(history_id):
+            return True
+        history_names = {
+            str(row.get(field) or "").strip().casefold()
+            for field in ("friendly_name", "user", "username", "display_name")
+        }
+        return bool(history_names & _identity_values(user))
+
+    def _completion_percent(row):
+        for field in ("percent_complete", "watched_status"):
+            value = row.get(field)
+            if value in (None, ""):
+                continue
+            if isinstance(value, str):
+                value = value.strip().casefold()
+                if value in ("completed", "complete", "watched"):
+                    return 100
+                if value in ("not_watched", "unwatched"):
+                    return 0
+            try:
+                return max(0, min(100, float(value)))
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    def _requester_status(user, history, rating_key):
+        matching = [
+            row for row in history
+            if isinstance(row, dict)
+            and (
+                not row.get("rating_key")
+                or str(row.get("rating_key")) == str(rating_key)
+                or (
+                    media_type == "show"
+                    and str(row.get("grandparent_rating_key")) == str(rating_key)
+                )
+            )
+            and _history_matches_requester(row, user)
+        ]
+        if not matching:
+            return "not_watched"
+        highest = max(_completion_percent(row) for row in matching)
+        return "completed" if highest >= _WATCHED_THRESHOLD else "partial"
+
     def _lookup(rk):
-        result = {"rating_key": rk, "requested_by": None}
+        result = {"rating_key": rk, "requested_by": None, "requesters": []}
         try:
             meta = tautulli.get_metadata(rk)
             ids = extract_ids(meta)
@@ -479,7 +569,7 @@ def api_overseerr_info():
             if not tmdb_id:
                 return result
 
-            media = overseerr.overseerr_find_media(tmdb_id, media_type)
+            media = _cached_requester_media(tmdb_id)
             if not media:
                 return result
 
@@ -489,7 +579,10 @@ def api_overseerr_info():
 
             reqs = media_info.get("requests") or []
             requestors = []
+            requester_users = []
             for req in reqs:
+                if not isinstance(req, dict):
+                    continue
                 user = req.get("requestedBy") or {}
                 name = (
                     user.get("displayName")
@@ -499,7 +592,21 @@ def api_overseerr_info():
                 )
                 if name and name not in requestors:
                     requestors.append(name)
+                    requester_users.append((name, user))
             if requestors:
+                try:
+                    history = _cached_item_history(rk)
+                    history_error = False
+                except Exception:
+                    history = []
+                    history_error = True
+                result["requesters"] = [
+                    {
+                        "name": name,
+                        "status": "unavailable" if history_error else _requester_status(user, history, rk),
+                    }
+                    for name, user in requester_users
+                ]
                 result["requested_by"] = ", ".join(requestors)
         except Exception:
             pass

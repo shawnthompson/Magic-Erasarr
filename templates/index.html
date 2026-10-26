@@ -243,6 +243,8 @@
   .viewer-row { display: flex; justify-content: space-between; gap: 0.75rem; }
   .viewer-row + .viewer-row { margin-top: 0.25rem; }
   .viewer-plays { color: var(--text-dim); white-space: nowrap; }
+  .requester-row + .requester-row { margin-top: 0.25rem; }
+  .requester-status { color: var(--text-dim); white-space: nowrap; }
 
   input[type="checkbox"] {
     width: 16px;
@@ -886,6 +888,24 @@
   }
 
   // --- Media ---
+  function requesterStatusLabel(status) {
+    return ({
+      completed: 'watched',
+      partial: 'partially watched',
+      not_watched: 'not watched',
+      unavailable: 'status unavailable',
+    })[status] || 'status unavailable';
+  }
+
+  function renderRequesterStatus(osr) {
+    if (!osr || !Array.isArray(osr.requesters) || !osr.requesters.length) {
+      return osr && osr.requested_by ? esc(osr.requested_by) : '<span class="dim">—</span>';
+    }
+    return osr.requesters.map(requester =>
+      `<div class="requester-row"><span>${esc(requester.name)}</span> <span class="requester-status">(${esc(requesterStatusLabel(requester.status))})</span></div>`
+    ).join('');
+  }
+
   function renderTable(items, overseerrInfo, viewerInfo, showSummaryInfo) {
     const body = $('#mediaBody');
     body.innerHTML = items.map(item => {
@@ -921,7 +941,7 @@
       if (currentLibType === 'artist') {
         reqByHtml = '<span class="dim">—</span>';
       } else if (overseerrInfo) {
-        reqByHtml = (osr && osr.requested_by) ? esc(osr.requested_by) : '<span class="dim">—</span>';
+        reqByHtml = renderRequesterStatus(osr);
       } else {
         reqByHtml = '<span class="cell-loading">loading...</span>';
       }
@@ -1046,6 +1066,7 @@
         <h3>Seerr request</h3>
         <div class="detail-grid">
           ${detailField('Requested by', osr && osr.requested_by ? esc(osr.requested_by) : '')}
+          ${detailField('Watch status', osr && osr.requesters && osr.requesters.length ? esc(osr.requesters.map(requester => `${requester.name}: ${requesterStatusLabel(requester.status)}`).join(', ')) : '')}
         </div>
       </section>
       <section class="detail-section">
