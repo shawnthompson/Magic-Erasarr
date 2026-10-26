@@ -166,6 +166,16 @@ def get_item_user_stats(rating_key) -> list:
     return data if isinstance(data, list) else []
 
 
+def get_users() -> list:
+    """Return Tautulli users, including their stable Plex user IDs."""
+    data = tautulli_get("get_users")
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and isinstance(data.get("users"), list):
+        return data["users"]
+    return []
+
+
 def get_item_history(rating_key, media_type: str = "movie") -> list:
     """Return playback history for one movie or show, including partial-playback fields.
 

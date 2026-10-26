@@ -78,6 +78,7 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
 
     monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://123"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 1}, {"user_id": 2}])
     monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
         "mediaInfo": {"requests": [
             {"requestedBy": {"plexId": 1, "displayName": "Alice"}},
@@ -125,8 +126,9 @@ def test_overseerr_info_matches_watched_show_episode_history(client, monkeypatch
 
     monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://127"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 6}])
     monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
-        "mediaInfo": {"requests": [{"requestedBy": {"user_id": 6, "displayName": "Frank"}}]}
+        "mediaInfo": {"requests": [{"requestedBy": {"plexId": 6, "displayName": "Frank"}}]}
     })
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [{
         "rating_key": "episode-1",
@@ -152,8 +154,9 @@ def test_overseerr_info_handles_empty_history(client, monkeypatch):
 
     monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://124"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 3}])
     monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
-        "mediaInfo": {"requests": [{"requestedBy": {"user_id": 3, "displayName": "Casey"}}]}
+        "mediaInfo": {"requests": [{"requestedBy": {"plexId": 3, "displayName": "Casey"}}]}
     })
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [])
 
@@ -170,8 +173,9 @@ def test_overseerr_info_preserves_requester_when_history_fails(client, monkeypat
 
     monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://125"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 4}])
     monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
-        "mediaInfo": {"requests": [{"requestedBy": {"user_id": 4, "displayName": "Dana"}}]}
+        "mediaInfo": {"requests": [{"requestedBy": {"plexId": 4, "displayName": "Dana"}}]}
     })
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: (_ for _ in ()).throw(RuntimeError("offline")))
 
@@ -189,11 +193,12 @@ def test_overseerr_info_caches_seerr_and_history_lookups(client, monkeypatch):
 
     monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://126"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 5}])
     calls = {"seerr": 0, "history": 0}
 
     def fake_media(*_):
         calls["seerr"] += 1
-        return {"mediaInfo": {"requests": [{"requestedBy": {"user_id": 5, "displayName": "Evan"}}]}}
+        return {"mediaInfo": {"requests": [{"requestedBy": {"plexId": 5, "displayName": "Evan"}}]}}
 
     def fake_history(*_):
         calls["history"] += 1
@@ -207,6 +212,92 @@ def test_overseerr_info_caches_seerr_and_history_lookups(client, monkeypatch):
         assert r.status_code == 200
 
     assert calls == {"seerr": 1, "history": 1}
+
+
+def test_overseerr_info_marks_missing_and_deleted_requester_ids_unknown(client, monkeypatch):
+    """A missing or deleted Tautulli user is never treated as a name match."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://127"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 10, "friendly_name": "Known"}])
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [
+            {"requestedBy": {"plexId": 99, "displayName": "Deleted"}},
+            {"requestedBy": {"displayName": "No ID"}},
+        ]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [
+        {"rating_key": "movie-identities", "user_id": 99, "friendly_name": "Deleted", "percent_complete": 100},
+        {"rating_key": "movie-identities", "user_id": 10, "friendly_name": "No ID", "percent_complete": 100},
+    ])
+
+    r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-identities"]})
+
+    assert r.get_json()["movie-identities"]["requesters"] == [
+        {"name": "Deleted", "status": "not_watched", "last_watched": None, "identity_match": "unknown"},
+        {"name": "No ID", "status": "not_watched", "last_watched": None, "identity_match": "unknown"},
+    ]
+
+
+def test_overseerr_info_uses_name_fallback_and_keeps_same_named_requesters(client, monkeypatch):
+    """Name fallback is explicit and distinct Plex IDs are not collapsed by display name."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://128"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [
+        {"user_id": 10, "friendly_name": "Shared Name"},
+        {"user_id": 11, "friendly_name": "Other Name"},
+    ])
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [
+            {"requestedBy": {"displayName": "Shared Name"}},
+            {"requestedBy": {"plexId": 11, "displayName": "Shared Name"}},
+        ]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [
+        {"rating_key": "movie-same-name", "user_id": 10, "percent_complete": 100},
+        {"rating_key": "movie-same-name", "user_id": 11, "percent_complete": 100},
+    ])
+
+    r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-same-name"]})
+
+    assert r.get_json()["movie-same-name"]["requesters"] == [
+        {"name": "Shared Name", "status": "completed", "last_watched": None, "identity_match": "name_fallback"},
+        {"name": "Shared Name", "status": "completed", "last_watched": None, "identity_match": "stable_id"},
+    ]
+
+
+def test_overseerr_info_resolves_seerr_requester_id_before_matching(client, monkeypatch):
+    """Media responses without plexId use the Seerr user record for stable matching."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://129"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 42}])
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [{"requestedBy": {"id": 7, "displayName": "Alice"}}]}
+    })
+    user_lookups = []
+
+    def fake_user(user_id):
+        user_lookups.append(user_id)
+        return {"id": user_id, "plexId": 42, "displayName": "Alice"}
+
+    monkeypatch.setattr(api.overseerr, "overseerr_find_user", fake_user)
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [{
+        "rating_key": "movie-resolved-user",
+        "user_id": 42,
+        "percent_complete": 100,
+    }])
+
+    r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-resolved-user"]})
+
+    assert r.get_json()["movie-resolved-user"]["requesters"] == [
+        {"name": "Alice", "status": "completed", "last_watched": None, "identity_match": "stable_id"},
+    ]
+    assert user_lookups == [7]
 
 
 def test_remove_movie_uses_stable_ids_for_each_radarr_instance(client, monkeypatch):
