@@ -951,7 +951,7 @@
       return osr && osr.requested_by ? esc(osr.requested_by) : '<span class="dim">—</span>';
     }
     return osr.requesters.map(requester =>
-      `<div class="requester-row"><span>${esc(requester.name)}</span> <span class="requester-status">(${esc(requesterStatusLabel(requester.status))}${requester.last_watched ? `; last watched ${esc(new Date(Number(requester.last_watched) * 1000).toLocaleDateString())}` : ''}; ${esc(requesterThresholdLabel(osr))}; ${esc(requesterIdentityLabel(requester.identity_match))}${requester.status_reason ? `; ${esc(requester.status_reason.replace(/_/g, ' '))}` : ''})</span></div>`
+      `<div class="requester-row"><span>${esc(requester.name)}</span></div>`
     ).join('');
   }
 
@@ -1115,7 +1115,7 @@
         <h3>Seerr request</h3>
         <div class="detail-grid">
           ${detailField('Requested by', osr && osr.requested_by ? esc(osr.requested_by) : '')}
-          ${detailField('Watch status', osr && osr.requesters && osr.requesters.length ? esc(osr.requesters.map(requester => `${requester.name}: ${requesterStatusLabel(requester.status)}${requester.last_watched ? `; last watched ${new Date(Number(requester.last_watched) * 1000).toLocaleDateString()}` : ''}; ${requesterThresholdLabel(osr)}${requester.status_reason ? ` (${requester.status_reason.replaceAll('_', ' ')})` : ''}`).join(', ')) : '')}
+          ${detailField('Watch status', osr && osr.requesters && osr.requesters.length ? esc(osr.requesters.map(requester => `${requester.name}: ${requesterStatusLabel(requester.status)}${requester.last_watched ? `; last watched ${new Date(Number(requester.last_watched) * 1000).toLocaleDateString()}` : ''}; ${requesterThresholdLabel(osr)}; ${requesterIdentityLabel(requester.identity_match)}${requester.status_reason ? `; ${requester.status_reason.replaceAll('_', ' ')}` : ''}`).join(', ')) : '')}
         </div>
       </section>
       <section class="detail-section">
