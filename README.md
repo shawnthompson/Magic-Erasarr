@@ -24,6 +24,8 @@
    - Wait 20 seconds, then trigger a **Tautulli** media info refresh so Tautulli’s cache reflects Plex’s changes
    - Reload the page so the library list is up to date
 
+Requester watch status uses Tautulli's configured movie watched percentage when available, with an 85% fallback. The dashboard's optional **Watched threshold** field can override that value for the current lookup (for example, 90%) without changing Tautulli. Each requester status shows the threshold and source used.
+
 **Note:** Items removed from Radarr/Sonarr/Lidarr will still appear in **Tautulli** until Plex has scanned and Tautulli has refreshed. The app triggers both automatically when Plex is configured.
 
 **Tautulli “calculating file sizes”:** When Tautulli is calculating file sizes for a library (e.g. after a refresh), **the data shown in the app may not be up to date**. A yellow alert banner at the top of the page appears when the app detects this state. File sizes and other fields may be missing or stale until Tautulli finishes. You can still use the app; consider reloading after Tautulli has finished calculating.

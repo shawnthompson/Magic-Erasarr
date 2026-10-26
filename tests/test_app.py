@@ -73,7 +73,7 @@ def test_tautulli_viewers_returns_per_user_stats(client, monkeypatch):
 
 
 def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
-    """Requester status is matched per item and uses the 90% completion boundary."""
+    """Requester status is matched per item and uses the 85% default boundary."""
     from routes import api
 
     monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
@@ -86,7 +86,7 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
         ]}
     })
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [
-        {"rating_key": "movie-1", "user_id": 1, "percent_complete": 89, "date": 1700000000},
+        {"rating_key": "movie-1", "user_id": 1, "percent_complete": 84, "date": 1700000000},
         {"rating_key": "movie-1", "user_id": 2, "percent_complete": 90},
         # A stale duplicate rating key must not affect this item's status.
         {"rating_key": "old-movie-1", "user_id": 1, "percent_complete": 100},
@@ -95,10 +95,49 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
     r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-1", "movie-1"]})
 
     assert r.status_code == 200
+    assert r.get_json()["movie-1"]["watched_threshold"] == 85
+    assert r.get_json()["movie-1"]["watched_threshold_source"] == "fallback"
     assert r.get_json()["movie-1"]["requesters"] == [
         {"name": "Alice", "status": "partial", "last_watched": 1700000000, "identity_match": "stable_id"},
         {"name": "Bob", "status": "completed", "last_watched": None, "identity_match": "stable_id"},
     ]
+
+
+def test_overseerr_info_uses_configured_and_dashboard_watched_threshold(client, monkeypatch):
+    """The configured threshold is the default, with a request-scoped override."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_settings", lambda: {
+        "Monitoring": {"movie_watched_percent": 85},
+    })
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://130"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 8}])
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [{"requestedBy": {"plexId": 8, "displayName": "Grace"}}]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [
+        {"rating_key": "movie-threshold", "user_id": 8, "percent_complete": 88},
+    ])
+
+    default_response = client.post("/api/overseerr-info", json={"rating_keys": ["movie-threshold"]})
+    override_response = client.post(
+        "/api/overseerr-info",
+        json={"rating_keys": ["movie-threshold"], "watched_threshold": 90},
+    )
+    reset_response = client.post(
+        "/api/overseerr-info",
+        json={"rating_keys": ["movie-threshold"], "watched_threshold": None},
+    )
+
+    assert default_response.get_json()["movie-threshold"]["watched_threshold"] == 85
+    assert default_response.get_json()["movie-threshold"]["watched_threshold_source"] == "tautulli"
+    assert default_response.get_json()["movie-threshold"]["requesters"][0]["status"] == "completed"
+    assert override_response.get_json()["movie-threshold"]["watched_threshold"] == 90
+    assert override_response.get_json()["movie-threshold"]["watched_threshold_source"] == "dashboard_override"
+    assert override_response.get_json()["movie-threshold"]["requesters"][0]["status"] == "partial"
+    assert reset_response.get_json()["movie-threshold"]["watched_threshold"] == 85
+    assert reset_response.get_json()["movie-threshold"]["requesters"][0]["status"] == "completed"
 
 
 def test_tautulli_show_history_queries_episode_scope(monkeypatch):
