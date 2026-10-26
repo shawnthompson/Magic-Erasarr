@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.9.0] - 2026-10-26
+
+### Fixed
+
+- **TV library loading** — TV episode summaries no longer block the initial library response; summaries load separately with bounded concurrency and short-lived caching.
+- **Episode play counts** — Episode totals now come from per-user Tautulli playback statistics instead of unavailable children metadata fields.
+- **Episode viewer loading** — Per-episode viewer lookups now use bounded concurrency.
+
 ## [1.8.0] - 2026-10-26
 
 ### Changed

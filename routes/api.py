@@ -25,6 +25,9 @@ api_bp = Blueprint("api", __name__, url_prefix="/api")
 _VIEWER_CACHE_TTL = 300
 _viewer_cache = {}
 _viewer_cache_lock = Lock()
+_SUMMARY_CACHE_TTL = 300
+_summary_cache = {}
+_summary_cache_lock = Lock()
 
 
 def _metadata_file_size(metadata):
@@ -45,7 +48,7 @@ def _metadata_file_size(metadata):
     return total
 
 
-def _get_show_episode_summary(rating_key):
+def _fetch_show_episode_summary(rating_key):
     """Return episode count and combined file size for a TV show."""
     show_data = tautulli.get_children_metadata(rating_key, "show")
     episodes = []
@@ -70,13 +73,19 @@ def _get_show_episode_summary(rating_key):
     return {"episode_count": len(episodes), "file_size": sum(sizes)}
 
 
-def _enrich_show_item(item):
-    """Add TV-specific summary fields without failing the library response."""
-    try:
-        item.update(_get_show_episode_summary(item["rating_key"]))
-    except Exception:
-        item.setdefault("episode_count", None)
-    return item
+def _get_show_episode_summary(rating_key):
+    """Return a short-lived cached TV episode count and combined file size."""
+    key = str(rating_key)
+    now = time.monotonic()
+    with _summary_cache_lock:
+        cached = _summary_cache.get(key)
+        if cached and now - cached[0] < _SUMMARY_CACHE_TTL:
+            return cached[1]
+
+    summary = _fetch_show_episode_summary(rating_key)
+    with _summary_cache_lock:
+        _summary_cache[key] = (now, summary)
+    return summary
 
 @api_bp.route("/debug")
 def api_debug():
@@ -426,11 +435,6 @@ def api_library_combined():
         total = len(all_items)
         page_items = all_items[start : start + length]
 
-        # File size normalization for shows
-        if section_type == "show":
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                page_items = list(pool.map(_enrich_show_item, page_items))
-
         out = {
             "data": page_items,
             "recordsFiltered": total,
@@ -577,6 +581,37 @@ def api_tautulli_viewers():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/tautulli-show-summaries", methods=["POST"])
+def api_tautulli_show_summaries():
+    """Batch-return cached TV episode counts and combined file sizes."""
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        return jsonify({"error": "Invalid JSON body"}), 400
+
+    raw_keys = body.get("rating_keys", [])
+    if not isinstance(raw_keys, list):
+        return jsonify({"error": "rating_keys must be a list"}), 400
+    rating_keys = list(dict.fromkeys(str(key) for key in raw_keys if key is not None))[:50]
+
+    def _lookup(rating_key):
+        try:
+            return rating_key, _get_show_episode_summary(rating_key)
+        except Exception:
+            return rating_key, {"episode_count": None, "file_size": 0, "error": True}
+
+    try:
+        info = {}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(_lookup, key) for key in rating_keys]
+            for future in futures:
+                key, summary = future.result()
+                info[key] = summary
+        return jsonify(info)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/tautulli-episodes")
 def api_tautulli_episodes():
     """Return TV seasons, episodes, and per-user play stats for a show."""
@@ -586,11 +621,16 @@ def api_tautulli_episodes():
 
     def episode_viewers(episode):
         viewers = []
+        play_count = 0
         try:
             for row in _cached_tautulli_viewers(episode["rating_key"]):
                 if not isinstance(row, dict):
                     continue
                 name = row.get("friendly_name") or row.get("username")
+                try:
+                    play_count += int(row.get("total_plays") or 0)
+                except (TypeError, ValueError):
+                    pass
                 if name:
                     viewers.append({
                         "name": str(name),
@@ -598,6 +638,7 @@ def api_tautulli_episodes():
                     })
         except Exception:
             pass
+        episode["play_count"] = play_count
         episode["viewers"] = viewers
         return episode
 
@@ -621,10 +662,12 @@ def api_tautulli_episodes():
                     "play_count": episode.get("play_count", 0),
                     "last_played": episode.get("last_played"),
                 })
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                episodes = list(pool.map(episode_viewers, episodes))
             seasons.append({
                 "season_number": season.get("parent_index") or season.get("index"),
                 "title": season.get("title") or season.get("full_title") or "Season",
-                "episodes": [episode_viewers(episode) for episode in episodes],
+                "episodes": episodes,
             })
         return jsonify({"rating_key": str(rating_key), "seasons": seasons})
     except Exception as e:

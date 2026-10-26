@@ -91,7 +91,6 @@ def test_tautulli_episodes_returns_episode_viewers(client, monkeypatch):
             "rating_key": "episode-1",
             "media_index": 1,
             "title": "Pilot",
-            "play_count": 3,
             "last_played": 1700000000,
         }]}
 
@@ -140,3 +139,52 @@ def test_show_episode_summary_counts_episodes_and_file_sizes(monkeypatch):
         "episode_count": 2,
         "file_size": 350,
     }
+
+
+def test_show_summaries_endpoint_batches_cached_summaries(client, monkeypatch):
+    """TV summary lookups are available separately from the library response."""
+    from routes import api
+
+    monkeypatch.setattr(
+        api,
+        "_get_show_episode_summary",
+        lambda key: {"episode_count": 2, "file_size": 350} if key == "show-1" else {"episode_count": 8, "file_size": 900},
+    )
+
+    r = client.post("/api/tautulli-show-summaries", json={"rating_keys": ["show-1", "show-2"]})
+
+    assert r.status_code == 200
+    assert r.get_json() == {
+        "show-1": {"episode_count": 2, "file_size": 350},
+        "show-2": {"episode_count": 8, "file_size": 900},
+    }
+
+
+def test_library_combined_does_not_scan_show_episodes(client, monkeypatch):
+    """The library response stays fast and leaves TV summaries to the separate endpoint."""
+    from routes import api
+
+    monkeypatch.setattr(api.tautulli, "get_tautulli_libraries", lambda: [{
+        "section_id": "1",
+        "section_name": "TV Shows",
+        "section_type": "show",
+    }])
+    monkeypatch.setattr(api.tautulli, "get_library_media_response", lambda *args, **kwargs: {
+        "result": "success",
+        "data": {"data": [{"rating_key": "show-1", "title": "Example Show"}]},
+    })
+
+    def fail_if_called(_rating_key):
+        raise AssertionError("show episode summaries must not run during library loading")
+
+    monkeypatch.setattr(api, "_get_show_episode_summary", fail_if_called)
+
+    r = client.get("/api/library/combined?type=show&length=1")
+
+    assert r.status_code == 200
+    assert r.get_json()["data"] == [{
+        "rating_key": "show-1",
+        "title": "Example Show",
+        "library_name": "TV Shows",
+        "section_id": "1",
+    }]

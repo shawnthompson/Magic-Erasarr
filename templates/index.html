@@ -786,6 +786,7 @@
   let lastItems = [];
   let lastOsrInfo = null;
   let lastViewerInfo = null;
+  let lastShowSummaryInfo = null;
   const debugEnabled = {{ 'true' if debug else 'false' }};
   let seerrDisplayName = 'Seerr';
   let libraryLoaded = false;
@@ -885,21 +886,24 @@
   }
 
   // --- Media ---
-  function renderTable(items, overseerrInfo, viewerInfo) {
+  function renderTable(items, overseerrInfo, viewerInfo, showSummaryInfo) {
     const body = $('#mediaBody');
     body.innerHTML = items.map(item => {
       const rk = item.rating_key;
+      const showSummary = showSummaryInfo ? showSummaryInfo[String(rk)] : null;
       const isChecked = selected.has(String(rk)) ? 'checked' : '';
       const selClass = isChecked ? 'selected' : '';
       const lastPlayed = item.last_played
         ? new Date(item.last_played * 1000).toLocaleDateString()
         : 'Never';
       // Tautulli: movies use file_size; shows often have no file_size until media info cache is refreshed
-      const rawSize = getFileSize(item);
+      const rawSize = currentLibType === 'show' ? getFileSize(showSummary) : getFileSize(item);
       const fileSize = rawSize > 0 ? formatBytes(rawSize) : '—';
       let fileBadge;
-      if (currentLibType === 'show' && item.episode_count != null) {
-        const count = Number(item.episode_count) || 0;
+      if (currentLibType === 'show' && showSummaryInfo === null) {
+        fileBadge = '<span class="cell-loading">loading...</span>';
+      } else if (currentLibType === 'show' && showSummary && showSummary.episode_count != null) {
+        const count = Number(showSummary.episode_count) || 0;
         fileBadge = `${count} total episode${count === 1 ? '' : 's'}`;
       } else if (currentLibType === 'show') {
         fileBadge = '<span class="dim">Episode count unavailable</span>';
@@ -979,11 +983,11 @@
     return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
   }
 
-  function renderItemDetails(item, osr, viewer, ids) {
-    const rawSize = getFileSize(item);
-    const episodeCount = Number(item.episode_count);
+  function renderItemDetails(item, osr, viewer, ids, showSummary) {
+    const rawSize = currentLibType === 'show' ? getFileSize(showSummary) : getFileSize(item);
+    const episodeCount = Number(showSummary && showSummary.episode_count);
     const fileStatus = currentLibType === 'show'
-      ? (item.episode_count != null
+      ? (showSummary && showSummary.episode_count != null
         ? `${Number.isFinite(episodeCount) ? episodeCount : 0} total episode${episodeCount === 1 ? '' : 's'}`
         : 'Episode count unavailable')
       : (rawSize > 0 ? 'On Disk' : (currentLibType === 'movie' ? 'Missing or unavailable' : 'Unavailable'));
@@ -1098,6 +1102,7 @@
     const requestNumber = ++detailRequestNumber;
     const osr = lastOsrInfo ? lastOsrInfo[String(ratingKey)] : null;
     const viewer = lastViewerInfo ? lastViewerInfo[String(ratingKey)] : null;
+    const showSummary = lastShowSummaryInfo ? lastShowSummaryInfo[String(ratingKey)] : null;
     $('#detailModalTitle').textContent = item.title || 'Item details';
     $('#detailModalSubtitle').textContent = item.year ? String(item.year) : '';
     const poster = $('#detailModalPoster');
@@ -1123,7 +1128,7 @@
       }
     }
     if (requestNumber === detailRequestNumber) {
-      renderItemDetails(item, osr, viewer, ids);
+      renderItemDetails(item, osr, viewer, ids, showSummary);
       if (currentLibType === 'show') loadEpisodeBreakdown(item.rating_key, requestNumber);
     }
   }
@@ -1217,9 +1222,10 @@
       lastItems = items;
       lastOsrInfo = null;
       lastViewerInfo = null;
+      lastShowSummaryInfo = currentLibType === 'show' ? null : {};
       updateSortHeaders();
 
-      renderTable(items, null, null);
+      renderTable(items, null, null, lastShowSummaryInfo);
 
       const totalPages = Math.ceil(totalCount / PAGE_SIZE);
       $('#pageInfo').textContent = `Page ${page + 1} of ${totalPages} (${totalCount} items)`;
@@ -1233,7 +1239,8 @@
       if (currentLibType === 'artist') {
         lastOsrInfo = {};
         lastViewerInfo = {};
-        renderTable(items, {}, {});
+        lastShowSummaryInfo = {};
+        renderTable(items, {}, {}, lastShowSummaryInfo);
       } else {
         const ratingKeys = items.map(i => String(i.rating_key));
         try {
@@ -1273,13 +1280,31 @@
             $('#pageInfo').textContent = `Requested by "${requestorSearch}": ${displayItems.length} match(es) on this page`;
             $('#paginationBar').style.display = 'none';
           }
-          renderTable(displayItems, osrInfo, viewerInfo);
+          renderTable(displayItems, osrInfo, viewerInfo, lastShowSummaryInfo);
           updateSelectionBar();
           $('#requestorSearchWrap').style.display = '';
+
+          if (currentLibType === 'show') {
+            try {
+              const summaryRes = await fetch('/api/tautulli-show-summaries', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rating_keys: ratingKeys }),
+              });
+              lastShowSummaryInfo = await parseJsonResponse(summaryRes);
+              if (!summaryRes.ok) throw new Error(lastShowSummaryInfo.error || `HTTP ${summaryRes.status}`);
+              renderTable(displayItems, osrInfo, viewerInfo, lastShowSummaryInfo);
+              updateSelectionBar();
+            } catch {
+              lastShowSummaryInfo = {};
+              renderTable(displayItems, osrInfo, viewerInfo, lastShowSummaryInfo);
+            }
+          }
         } catch {
           lastOsrInfo = {};
           lastViewerInfo = {};
-          renderTable(items, {}, {});
+          lastShowSummaryInfo = currentLibType === 'show' ? {} : {};
+          renderTable(items, {}, {}, lastShowSummaryInfo);
         }
       }
     } catch (e) {
@@ -1685,7 +1710,7 @@
       if (col === 'requested_by' && lastItems.length && lastOsrInfo) {
         updateSortHeaders();
         const sorted = sortItemsByRequestedBy(lastItems, lastOsrInfo, sortDir);
-        renderTable(sorted, lastOsrInfo, lastViewerInfo);
+        renderTable(sorted, lastOsrInfo, lastViewerInfo, lastShowSummaryInfo);
         updateSelectionBar();
         return;
       }
