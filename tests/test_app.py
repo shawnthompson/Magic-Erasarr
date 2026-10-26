@@ -80,12 +80,12 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://123"]})
     monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
         "mediaInfo": {"requests": [
-            {"requestedBy": {"user_id": 1, "displayName": "Alice"}},
-            {"requestedBy": {"user_id": 2, "displayName": "Bob"}},
+            {"requestedBy": {"plexId": 1, "displayName": "Alice"}},
+            {"requestedBy": {"plexId": 2, "displayName": "Bob"}},
         ]}
     })
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [
-        {"rating_key": "movie-1", "user_id": 1, "percent_complete": 89},
+        {"rating_key": "movie-1", "user_id": 1, "percent_complete": 89, "date": 1700000000},
         {"rating_key": "movie-1", "user_id": 2, "percent_complete": 90},
         # A stale duplicate rating key must not affect this item's status.
         {"rating_key": "old-movie-1", "user_id": 1, "percent_complete": 100},
@@ -95,8 +95,8 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
 
     assert r.status_code == 200
     assert r.get_json()["movie-1"]["requesters"] == [
-        {"name": "Alice", "status": "partial"},
-        {"name": "Bob", "status": "completed"},
+        {"name": "Alice", "status": "partial", "last_watched": 1700000000, "identity_match": "stable_id"},
+        {"name": "Bob", "status": "completed", "last_watched": None, "identity_match": "stable_id"},
     ]
 
 
@@ -142,7 +142,7 @@ def test_overseerr_info_matches_watched_show_episode_history(client, monkeypatch
 
     assert r.status_code == 200
     assert r.get_json()["show-1"]["requesters"] == [
-        {"name": "Frank", "status": "completed"}
+        {"name": "Frank", "status": "completed", "last_watched": None, "identity_match": "stable_id"}
     ]
 
 
@@ -160,7 +160,7 @@ def test_overseerr_info_handles_empty_history(client, monkeypatch):
     r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-empty"]})
 
     assert r.get_json()["movie-empty"]["requesters"] == [
-        {"name": "Casey", "status": "not_watched"}
+        {"name": "Casey", "status": "not_watched", "last_watched": None, "identity_match": "stable_id"}
     ]
 
 
@@ -179,7 +179,7 @@ def test_overseerr_info_preserves_requester_when_history_fails(client, monkeypat
 
     assert r.status_code == 200
     assert r.get_json()["movie-error"]["requesters"] == [
-        {"name": "Dana", "status": "unavailable"}
+        {"name": "Dana", "status": "unknown", "last_watched": None, "status_reason": "history_unavailable", "identity_match": "stable_id"}
     ]
 
 
