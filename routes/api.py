@@ -1010,17 +1010,20 @@ def api_remove():
             skip_msg = "skipped (no IDs resolved)"
             results["arr"] = skip_msg
             if media_type == "movie":
-                # Fallback: find movie in Radarr by title (+ year) and delete
+                # Explicit, conservative fallback for legacy items without IDs.
                 if title and str(title).strip():
                     for i, inst in enumerate(RADARR_INSTANCES):
                         key = f"radarr_{i + 1}"
                         try:
-                            movie = radarr.radarr_find_movie_by_title(inst, title, year)
-                            if movie:
-                                radarr.radarr_delete_movie(inst, movie["id"], delete_files=True)
+                            candidates = radarr.radarr_find_movie_candidates_by_title(inst, title, year)
+                            if len(candidates) == 1:
+                                radarr.radarr_delete_movie(inst, candidates[0]["id"], delete_files=True)
                                 results[key] = "removed"
+                                results[f"{key}_match"] = "title_fallback"
+                            elif len(candidates) > 1:
+                                results[key] = "ambiguous (title fallback)"
                             else:
-                                results[key] = "not_found"
+                                results[key] = "unresolved (title fallback)"
                         except Exception as e:
                             results[key] = f"error: {e}"
                 else:
@@ -1043,7 +1046,7 @@ def api_remove():
                         radarr.radarr_delete_movie(inst, movie["id"], delete_files=True)
                         results[key] = "removed"
                     else:
-                        results[key] = "not_found"
+                        results[key] = "unresolved (stable ID not found)"
                 except Exception as e:
                     results[key] = f"error: {e}"
         elif media_type == "artist":

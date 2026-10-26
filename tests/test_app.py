@@ -209,6 +209,79 @@ def test_overseerr_info_caches_seerr_and_history_lookups(client, monkeypatch):
     assert calls == {"seerr": 1, "history": 1}
 
 
+def test_remove_movie_uses_stable_ids_for_each_radarr_instance(client, monkeypatch):
+    """A stable ID match is used independently for regular and 4K Radarr copies."""
+    from routes import api
+
+    monkeypatch.setattr(api, "RADARR_INSTANCES", [{"name": "Radarr"}, {"name": "Radarr 4K"}])
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda _key: {})
+    found = {
+        "radarr_1": {"id": 101},
+        "radarr_2": {"id": 202},
+    }
+    deleted = []
+
+    def find_movie(instance, **_):
+        key = "radarr_2" if instance["name"] == "Radarr 4K" else "radarr_1"
+        return found[key]
+
+    monkeypatch.setattr(api.radarr, "radarr_find_movie", find_movie)
+    monkeypatch.setattr(api.radarr, "radarr_delete_movie", lambda instance, movie_id, delete_files=True: deleted.append(movie_id))
+
+    response = client.post("/api/remove", json={
+        "rating_key": "plex-old-key",
+        "media_type": "movie",
+        "tmdb_id": "12345",
+        "title": "A title that must not be used",
+    })
+
+    assert response.status_code == 200
+    assert deleted == [101, 202]
+    assert response.get_json()["radarr_1"] == "removed"
+    assert response.get_json()["radarr_2"] == "removed"
+
+
+def test_remove_movie_reports_ambiguous_title_without_deleting(client, monkeypatch):
+    """Title fallback must not guess when Radarr returns multiple candidates."""
+    from routes import api
+
+    monkeypatch.setattr(api, "RADARR_INSTANCES", [{"name": "Radarr"}])
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda _key: {})
+    monkeypatch.setattr(api.radarr, "radarr_find_movie_candidates_by_title", lambda *_: [{"id": 1}, {"id": 2}])
+    monkeypatch.setattr(api.radarr, "radarr_delete_movie", lambda *_args, **_kwargs: pytest.fail("ambiguous title was deleted"))
+
+    response = client.post("/api/remove", json={
+        "rating_key": "plex-key",
+        "media_type": "movie",
+        "title": "Duplicated title",
+        "year": 2020,
+    })
+
+    assert response.status_code == 200
+    assert response.get_json()["radarr_1"] == "ambiguous (title fallback)"
+
+
+def test_remove_movie_reports_title_fallback_when_unique(client, monkeypatch):
+    """A unique title fallback is explicit in the service result."""
+    from routes import api
+
+    monkeypatch.setattr(api, "RADARR_INSTANCES", [{"name": "Radarr"}])
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda _key: {})
+    monkeypatch.setattr(api.radarr, "radarr_find_movie_candidates_by_title", lambda *_: [{"id": 7}])
+    deleted = []
+    monkeypatch.setattr(api.radarr, "radarr_delete_movie", lambda _instance, movie_id, delete_files=True: deleted.append(movie_id))
+
+    response = client.post("/api/remove", json={
+        "rating_key": "plex-key",
+        "media_type": "movie",
+        "title": "Unique title",
+    })
+
+    assert response.status_code == 200
+    assert deleted == [7]
+    assert response.get_json()["radarr_1_match"] == "title_fallback"
+
+
 def test_library_combined_preserves_requested_page(client, monkeypatch):
     """Combined libraries return the requested slice after merging and sorting."""
     from routes import api
