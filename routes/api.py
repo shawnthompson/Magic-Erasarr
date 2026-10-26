@@ -1,5 +1,6 @@
 """API routes."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 from threading import Lock
 import time
 
@@ -21,6 +22,7 @@ from services import lidarr, overseerr, plex as plex_svc, radarr, sonarr, tautul
 from utils.ids import extract_ids
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
+logger = logging.getLogger(__name__)
 
 _VIEWER_CACHE_TTL = 300
 _viewer_cache = {}
@@ -31,6 +33,9 @@ _requester_cache_lock = Lock()
 _HISTORY_CACHE_TTL = 300
 _history_cache = {}
 _history_cache_lock = Lock()
+_TAUTULLI_USERS_CACHE_TTL = 300
+_tautulli_users_cache = None
+_tautulli_users_cache_lock = Lock()
 _WATCHED_THRESHOLD = 90
 _SUMMARY_CACHE_TTL = 300
 _summary_cache = {}
@@ -504,25 +509,45 @@ def api_overseerr_info():
             _history_cache[key] = (now, history)
         return history
 
+    def _cached_tautulli_users():
+        global _tautulli_users_cache
+        now = time.monotonic()
+        with _tautulli_users_cache_lock:
+            cached = _tautulli_users_cache
+            if cached and now - cached[0] < _TAUTULLI_USERS_CACHE_TTL:
+                return cached[1]
+        try:
+            users = tautulli.get_users()
+        except Exception:
+            # Requester names from Seerr remain useful even when Tautulli's
+            # user list is temporarily unavailable; identity is then unknown.
+            return []
+        users = [user for user in users if isinstance(user, dict)]
+        with _tautulli_users_cache_lock:
+            _tautulli_users_cache = (now, users)
+        return users
+
     def _identity_values(user):
         values = {
             str(user.get(field) or "").strip().casefold()
-            for field in ("displayName", "display_name", "plexUsername", "username", "email")
+            for field in (
+                "displayName", "display_name", "plexUsername", "username",
+                "friendly_name", "email",
+            )
         }
         return {value for value in values if value}
 
-    def _history_matches_requester(row, user):
+    def _history_matches_requester(row, user_id, fallback_names):
         if not isinstance(row, dict):
             return False
-        requester_id = user.get("user_id")
         history_id = row.get("user_id")
-        if requester_id is not None and history_id is not None and str(requester_id) == str(history_id):
-            return True
+        if user_id is not None:
+            return history_id is not None and str(user_id) == str(history_id)
         history_names = {
             str(row.get(field) or "").strip().casefold()
             for field in ("friendly_name", "user", "username", "display_name")
         }
-        return bool(history_names & _identity_values(user))
+        return bool(history_names & fallback_names)
 
     def _completion_percent(row):
         for field in ("percent_complete", "watched_status"):
@@ -541,7 +566,7 @@ def api_overseerr_info():
                 continue
         return 0
 
-    def _requester_status(user, history, rating_key):
+    def _requester_status(user_id, fallback_names, history, rating_key):
         matching = [
             row for row in history
             if isinstance(row, dict)
@@ -553,7 +578,7 @@ def api_overseerr_info():
                     and str(row.get("grandparent_rating_key")) == str(rating_key)
                 )
             )
-            and _history_matches_requester(row, user)
+            and _history_matches_requester(row, user_id, fallback_names)
         ]
         if not matching:
             return "not_watched"
@@ -580,19 +605,71 @@ def api_overseerr_info():
             reqs = media_info.get("requests") or []
             requestors = []
             requester_users = []
+            requester_keys = set()
+            tautulli_users = _cached_tautulli_users()
+            tautulli_by_id = {
+                str(user.get("user_id")): user
+                for user in tautulli_users
+                if user.get("user_id") is not None
+            }
+            stable_matches = fallback_matches = unknown_matches = 0
             for req in reqs:
                 if not isinstance(req, dict):
                     continue
                 user = req.get("requestedBy") or {}
-                name = (
+                seerr_name = (
                     user.get("displayName")
                     or user.get("plexUsername")
                     or user.get("email")
                     or None
                 )
-                if name and name not in requestors:
+                plex_id = user.get("plexId")
+                tautulli_user = tautulli_by_id.get(str(plex_id)) if plex_id is not None else None
+                fallback_names = _identity_values(user)
+                if tautulli_user:
+                    match_type = "stable_id"
+                    name = seerr_name or next(
+                        (tautulli_user.get(field) for field in ("friendly_name", "username") if tautulli_user.get(field)),
+                        None,
+                    )
+                    user_id = tautulli_user.get("user_id")
+                    stable_matches += 1
+                elif plex_id is None:
+                    name_match = next(
+                        (
+                            candidate for candidate in tautulli_users
+                            if _identity_values(candidate) & fallback_names
+                        ),
+                        None,
+                    )
+                    match_type = "name_fallback" if name_match else "unknown"
+                    name = seerr_name or (
+                        next(
+                            (name_match.get(field) for field in ("friendly_name", "username") if name_match.get(field)),
+                            None,
+                        )
+                        if name_match else None
+                    )
+                    user_id = name_match.get("user_id") if name_match else None
+                    if name_match:
+                        fallback_matches += 1
+                    else:
+                        unknown_matches += 1
+                else:
+                    match_type = "unknown"
+                    name = seerr_name
+                    user_id = None
+                    unknown_matches += 1
+                status_names = fallback_names if match_type == "name_fallback" else set()
+                identity_key = (
+                    ("id", str(user_id))
+                    if user_id is not None
+                    else ("name", (name or "").casefold())
+                )
+                if name and identity_key not in requester_keys:
+                    requester_keys.add(identity_key)
                     requestors.append(name)
-                    requester_users.append((name, user))
+                    requester_users.append((name, user_id, status_names, match_type))
             if requestors:
                 try:
                     history = _cached_item_history(rk)
@@ -603,11 +680,18 @@ def api_overseerr_info():
                 result["requesters"] = [
                     {
                         "name": name,
-                        "status": "unavailable" if history_error else _requester_status(user, history, rk),
+                        "status": "unavailable" if history_error else _requester_status(user_id, fallback_names, history, rk),
+                        "identity_match": match_type,
                     }
-                    for name, user in requester_users
+                    for name, user_id, fallback_names, match_type in requester_users
                 ]
                 result["requested_by"] = ", ".join(requestors)
+            logger.debug(
+                "Requester identity resolution: stable_id=%d name_fallback=%d unknown=%d",
+                stable_matches,
+                fallback_matches,
+                unknown_matches,
+            )
         except Exception:
             pass
         return result

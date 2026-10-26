@@ -897,12 +897,20 @@
     })[status] || 'status unavailable';
   }
 
+  function requesterIdentityLabel(match) {
+    return ({
+      stable_id: 'matched by Plex ID',
+      name_fallback: 'name fallback',
+      unknown: 'identity unknown',
+    })[match] || 'identity unknown';
+  }
+
   function renderRequesterStatus(osr) {
     if (!osr || !Array.isArray(osr.requesters) || !osr.requesters.length) {
       return osr && osr.requested_by ? esc(osr.requested_by) : '<span class="dim">—</span>';
     }
     return osr.requesters.map(requester =>
-      `<div class="requester-row"><span>${esc(requester.name)}</span> <span class="requester-status">(${esc(requesterStatusLabel(requester.status))})</span></div>`
+      `<div class="requester-row"><span>${esc(requester.name)}</span> <span class="requester-status">(${esc(requesterStatusLabel(requester.status))}; ${esc(requesterIdentityLabel(requester.identity_match))})</span></div>`
     ).join('');
   }
 
