@@ -269,6 +269,37 @@ def test_overseerr_info_uses_name_fallback_and_keeps_same_named_requesters(clien
     ]
 
 
+def test_overseerr_info_resolves_seerr_requester_id_before_matching(client, monkeypatch):
+    """Media responses without plexId use the Seerr user record for stable matching."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://129"]})
+    monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 42}])
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [{"requestedBy": {"id": 7, "displayName": "Alice"}}]}
+    })
+    user_lookups = []
+
+    def fake_user(user_id):
+        user_lookups.append(user_id)
+        return {"id": user_id, "plexId": 42, "displayName": "Alice"}
+
+    monkeypatch.setattr(api.overseerr, "overseerr_find_user", fake_user)
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [{
+        "rating_key": "movie-resolved-user",
+        "user_id": 42,
+        "percent_complete": 100,
+    }])
+
+    r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-resolved-user"]})
+
+    assert r.get_json()["movie-resolved-user"]["requesters"] == [
+        {"name": "Alice", "status": "completed", "identity_match": "stable_id"},
+    ]
+    assert user_lookups == [7]
+
+
 def test_remove_movie_uses_stable_ids_for_each_radarr_instance(client, monkeypatch):
     """A stable ID match is used independently for regular and 4K Radarr copies."""
     from routes import api

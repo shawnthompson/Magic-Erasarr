@@ -30,6 +30,9 @@ _viewer_cache_lock = Lock()
 _REQUESTER_CACHE_TTL = 300
 _requester_cache = {}
 _requester_cache_lock = Lock()
+_REQUESTER_USER_CACHE_TTL = 300
+_requester_user_cache = {}
+_requester_user_cache_lock = Lock()
 _HISTORY_CACHE_TTL = 300
 _history_cache = {}
 _history_cache_lock = Lock()
@@ -509,6 +512,21 @@ def api_overseerr_info():
             _history_cache[key] = (now, history)
         return history
 
+    def _cached_requester_user(user_id):
+        key = str(user_id)
+        now = time.monotonic()
+        with _requester_user_cache_lock:
+            cached = _requester_user_cache.get(key)
+            if cached and now - cached[0] < _REQUESTER_USER_CACHE_TTL:
+                return cached[1]
+        try:
+            user = overseerr.overseerr_find_user(user_id)
+        except Exception:
+            user = None
+        with _requester_user_cache_lock:
+            _requester_user_cache[key] = (now, user)
+        return user
+
     def _cached_tautulli_users():
         global _tautulli_users_cache
         now = time.monotonic()
@@ -623,9 +641,12 @@ def api_overseerr_info():
                     or user.get("email")
                     or None
                 )
-                plex_id = user.get("plexId")
+                resolved_user = user
+                if user.get("plexId") is None and user.get("id") is not None:
+                    resolved_user = _cached_requester_user(user["id"]) or user
+                plex_id = resolved_user.get("plexId")
                 tautulli_user = tautulli_by_id.get(str(plex_id)) if plex_id is not None else None
-                fallback_names = _identity_values(user)
+                fallback_names = _identity_values(resolved_user)
                 if tautulli_user:
                     match_type = "stable_id"
                     name = seerr_name or next(
