@@ -26,6 +26,58 @@ _VIEWER_CACHE_TTL = 300
 _viewer_cache = {}
 _viewer_cache_lock = Lock()
 
+
+def _metadata_file_size(metadata):
+    """Sum file sizes from the parts in a Tautulli metadata response."""
+    if not isinstance(metadata, dict):
+        return 0
+    total = 0
+    for media in metadata.get("media_info", []) or []:
+        if not isinstance(media, dict):
+            continue
+        for part in media.get("parts", []) or []:
+            if not isinstance(part, dict):
+                continue
+            try:
+                total += int(part.get("file_size") or 0)
+            except (TypeError, ValueError):
+                pass
+    return total
+
+
+def _get_show_episode_summary(rating_key):
+    """Return episode count and combined file size for a TV show."""
+    show_data = tautulli.get_children_metadata(rating_key, "show")
+    episodes = []
+    for season in show_data.get("children_list", []) if isinstance(show_data, dict) else []:
+        if not isinstance(season, dict) or not season.get("rating_key"):
+            continue
+        season_data = tautulli.get_children_metadata(season["rating_key"], "season")
+        children = season_data.get("children_list", []) if isinstance(season_data, dict) else []
+        episodes.extend(
+            episode for episode in children
+            if isinstance(episode, dict) and episode.get("rating_key")
+        )
+
+    def episode_size(episode):
+        try:
+            return _metadata_file_size(tautulli.get_metadata(episode["rating_key"]))
+        except Exception:
+            return 0
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sizes = list(pool.map(episode_size, episodes))
+    return {"episode_count": len(episodes), "file_size": sum(sizes)}
+
+
+def _enrich_show_item(item):
+    """Add TV-specific summary fields without failing the library response."""
+    try:
+        item.update(_get_show_episode_summary(item["rating_key"]))
+    except Exception:
+        item.setdefault("episode_count", None)
+    return item
+
 @api_bp.route("/debug")
 def api_debug():
     """Debug: show libraries, a sample item, and its metadata resolution. Only when DEBUG=true in env."""
@@ -376,22 +428,8 @@ def api_library_combined():
 
         # File size normalization for shows
         if section_type == "show":
-            for item in page_items:
-                if isinstance(item, dict):
-                    fs, tfs = item.get("file_size"), item.get("total_file_size")
-                    if (fs is None or fs == 0 or fs == "") and tfs is not None:
-                        item["file_size"] = tfs
-                    if (item.get("file_size") or 0) == 0:
-                        for key in ("total_file_size", "size", "total_size"):
-                            v = item.get(key)
-                            if v is not None and v != "":
-                                try:
-                                    n = int(v) if isinstance(v, str) else v
-                                    if n > 0:
-                                        item["file_size"] = n
-                                        break
-                                except (TypeError, ValueError):
-                                    pass
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                page_items = list(pool.map(_enrich_show_item, page_items))
 
         out = {
             "data": page_items,

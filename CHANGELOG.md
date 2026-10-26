@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.0] - 2026-10-26
+
+### Changed
+
+- **TV show file summary** — TV rows now show the total episode count and combined episode file size instead of the generic `On Disk` label.
+
 ## [1.7.0] - 2026-10-25
 
 ### Added

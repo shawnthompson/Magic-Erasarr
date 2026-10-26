@@ -898,7 +898,12 @@
       const rawSize = getFileSize(item);
       const fileSize = rawSize > 0 ? formatBytes(rawSize) : '—';
       let fileBadge;
-      if (rawSize > 0) {
+      if (currentLibType === 'show' && item.episode_count != null) {
+        const count = Number(item.episode_count) || 0;
+        fileBadge = `${count} total episode${count === 1 ? '' : 's'}`;
+      } else if (currentLibType === 'show') {
+        fileBadge = '<span class="dim">Episode count unavailable</span>';
+      } else if (rawSize > 0) {
         fileBadge = '<span class="badge badge-file">On Disk</span>';
       } else if (currentLibType === 'artist' || currentLibType === 'show') {
         // Artist: no file concept. Show: Tautulli rarely has file_size at show level (only after cache refresh)
@@ -976,7 +981,12 @@
 
   function renderItemDetails(item, osr, viewer, ids) {
     const rawSize = getFileSize(item);
-    const fileStatus = rawSize > 0 ? 'On Disk' : (currentLibType === 'movie' ? 'Missing or unavailable' : 'Unavailable');
+    const episodeCount = Number(item.episode_count);
+    const fileStatus = currentLibType === 'show'
+      ? (item.episode_count != null
+        ? `${Number.isFinite(episodeCount) ? episodeCount : 0} total episode${episodeCount === 1 ? '' : 's'}`
+        : 'Episode count unavailable')
+      : (rawSize > 0 ? 'On Disk' : (currentLibType === 'movie' ? 'Missing or unavailable' : 'Unavailable'));
     const viewers = viewer && Array.isArray(viewer.viewers) ? viewer.viewers : [];
     const viewerHtml = viewer && viewer.error
       ? '<div class="detail-empty">Viewer statistics unavailable.</div>'
