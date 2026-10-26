@@ -39,7 +39,7 @@ _history_cache_lock = Lock()
 _TAUTULLI_USERS_CACHE_TTL = 300
 _tautulli_users_cache = None
 _tautulli_users_cache_lock = Lock()
-_WATCHED_THRESHOLD = 90
+_DEFAULT_WATCHED_THRESHOLD = 85
 _SUMMARY_CACHE_TTL = 300
 _summary_cache = {}
 _summary_cache_lock = Lock()
@@ -470,7 +470,8 @@ def api_overseerr_info():
     Expects JSON:
     {
         "rating_keys": ["123", "456", ...],
-        "media_type": "movie" | "show"
+        "media_type": "movie" | "show",
+        "watched_threshold": 90  # optional, request-scoped percentage override
     }
 
     Returns a dict keyed by rating_key with requestor info.
@@ -485,8 +486,54 @@ def api_overseerr_info():
     rating_keys = list(dict.fromkeys(str(key) for key in rating_keys if key is not None))[:100]
     media_type = body.get("media_type", "movie")
 
+    def _setting_value(settings, section_name, setting_name):
+        if not isinstance(settings, dict):
+            return None
+        section = next(
+            (
+                value for key, value in settings.items()
+                if str(key).casefold() == section_name.casefold() and isinstance(value, dict)
+            ),
+            None,
+        )
+        if not section:
+            return None
+        value = next(
+            (
+                value for key, value in section.items()
+                if str(key).casefold() == setting_name.casefold()
+            ),
+            None,
+        )
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return int(value) if 0 <= value <= 100 else None
+
+    def _watched_threshold():
+        override = body.get("watched_threshold")
+        if override not in (None, ""):
+            try:
+                override = float(override)
+            except (TypeError, ValueError):
+                override = None
+            if override is not None and 0 <= override <= 100:
+                return int(override), "dashboard_override"
+        try:
+            configured = _setting_value(
+                tautulli.get_settings(), "Monitoring", "movie_watched_percent"
+            )
+        except Exception:
+            configured = None
+        if configured is not None:
+            return configured, "tautulli"
+        return _DEFAULT_WATCHED_THRESHOLD, "fallback"
+
     if not OVERSEERR_API_KEY:
         return jsonify({})
+
+    watched_threshold, watched_threshold_source = _watched_threshold()
 
     def _cached_requester_media(tmdb_id):
         key = (str(tmdb_id), str(media_type))
@@ -618,12 +665,18 @@ def api_overseerr_info():
         timestamps = [_history_timestamp(row) for row in matching]
         timestamps = [timestamp for timestamp in timestamps if timestamp is not None]
         return {
-            "status": "completed" if highest >= _WATCHED_THRESHOLD else "partial",
+            "status": "completed" if highest >= watched_threshold else "partial",
             "last_watched": max(timestamps) if timestamps else None,
         }
 
     def _lookup(rk):
-        result = {"rating_key": rk, "requested_by": None, "requesters": []}
+        result = {
+            "rating_key": rk,
+            "requested_by": None,
+            "requesters": [],
+            "watched_threshold": watched_threshold,
+            "watched_threshold_source": watched_threshold_source,
+        }
         try:
             meta = tautulli.get_metadata(rk)
             ids = extract_ids(meta)
@@ -721,7 +774,11 @@ def api_overseerr_info():
                     {
                         "name": name,
                         **(
-                            {"status": "unknown", "last_watched": None, "status_reason": "history_unavailable"}
+                            {
+                                "status": "unknown",
+                                "last_watched": None,
+                                "status_reason": "history_unavailable",
+                            }
                             if history_error
                             else _requester_status(user_id, fallback_names, history, rk)
                         ),

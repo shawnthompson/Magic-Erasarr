@@ -176,6 +176,12 @@ def get_users() -> list:
     return []
 
 
+def get_settings() -> dict:
+    """Return Tautulli's configured settings without changing them."""
+    data = tautulli_get("get_settings")
+    return data if isinstance(data, dict) else {}
+
+
 def get_item_history(rating_key, media_type: str = "movie") -> list:
     """Return playback history for one movie or show, including partial-playback fields.
 

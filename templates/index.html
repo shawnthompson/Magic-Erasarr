@@ -87,6 +87,34 @@
     color: var(--text-dim);
     white-space: nowrap;
   }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .threshold-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-dim);
+    font-size: 0.875rem;
+  }
+  input[type="number"] {
+    width: 5rem;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.5rem;
+    font-size: 0.875rem;
+  }
+  input[type="number"]:focus { border-color: var(--accent); outline: none; }
 
   button {
     cursor: pointer;
@@ -686,6 +714,11 @@
     <div class="search-wrap" id="requestorSearchWrap" style="display:none;">
       <input type="text" id="requestorSearchInput" placeholder="Requested by..." />
     </div>
+    <label class="threshold-control" for="watchedThresholdInput">
+      Watched threshold
+      <input type="number" id="watchedThresholdInput" min="0" max="100" step="1" placeholder="Default" aria-describedby="watchedThresholdHelp" />%
+    </label>
+    <span id="watchedThresholdHelp" class="sr-only">Leave blank to use Tautulli's movie threshold, or 85 percent when it is unavailable.</span>
     <button class="btn-accent" id="loadBtn" disabled>Load</button>
   </div>
 
@@ -905,12 +938,20 @@
     })[match] || 'identity unknown';
   }
 
+  function requesterThresholdLabel(osr) {
+    const source = osr && osr.watched_threshold_source;
+    const sourceLabel = source === 'dashboard_override'
+      ? 'dashboard override'
+      : source === 'tautulli' ? 'Tautulli setting' : '85% fallback';
+    return `threshold ${Number(osr && osr.watched_threshold)}% (${sourceLabel})`;
+  }
+
   function renderRequesterStatus(osr) {
     if (!osr || !Array.isArray(osr.requesters) || !osr.requesters.length) {
       return osr && osr.requested_by ? esc(osr.requested_by) : '<span class="dim">—</span>';
     }
     return osr.requesters.map(requester =>
-      `<div class="requester-row"><span>${esc(requester.name)}</span> <span class="requester-status">(${esc(requesterStatusLabel(requester.status))}${requester.last_watched ? `; last watched ${esc(new Date(Number(requester.last_watched) * 1000).toLocaleDateString())}` : ''}; ${esc(requesterIdentityLabel(requester.identity_match))}${requester.status_reason ? `; ${esc(requester.status_reason.replace(/_/g, ' '))}` : ''})</span></div>`
+      `<div class="requester-row"><span>${esc(requester.name)}</span> <span class="requester-status">(${esc(requesterStatusLabel(requester.status))}${requester.last_watched ? `; last watched ${esc(new Date(Number(requester.last_watched) * 1000).toLocaleDateString())}` : ''}; ${esc(requesterThresholdLabel(osr))}; ${esc(requesterIdentityLabel(requester.identity_match))}${requester.status_reason ? `; ${esc(requester.status_reason.replace(/_/g, ' '))}` : ''})</span></div>`
     ).join('');
   }
 
@@ -1074,7 +1115,7 @@
         <h3>Seerr request</h3>
         <div class="detail-grid">
           ${detailField('Requested by', osr && osr.requested_by ? esc(osr.requested_by) : '')}
-          ${detailField('Watch status', osr && osr.requesters && osr.requesters.length ? esc(osr.requesters.map(requester => `${requester.name}: ${requesterStatusLabel(requester.status)}${requester.last_watched ? `; last watched ${new Date(Number(requester.last_watched) * 1000).toLocaleDateString()}` : ''}${requester.status_reason ? ` (${requester.status_reason.replaceAll('_', ' ')})` : ''}`).join(', ')) : '')}
+          ${detailField('Watch status', osr && osr.requesters && osr.requesters.length ? esc(osr.requesters.map(requester => `${requester.name}: ${requesterStatusLabel(requester.status)}${requester.last_watched ? `; last watched ${new Date(Number(requester.last_watched) * 1000).toLocaleDateString()}` : ''}; ${requesterThresholdLabel(osr)}${requester.status_reason ? ` (${requester.status_reason.replaceAll('_', ' ')})` : ''}`).join(', ')) : '')}
         </div>
       </section>
       <section class="detail-section">
@@ -1279,6 +1320,7 @@
             body: JSON.stringify({
               rating_keys: ratingKeys,
               media_type: currentLibType || 'movie',
+              watched_threshold: $('#watchedThresholdInput').value.trim() || null,
             }),
           });
           const osrInfo = await parseJsonResponse(osrRes);
