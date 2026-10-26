@@ -166,6 +166,20 @@ def get_item_user_stats(rating_key) -> list:
     return data if isinstance(data, list) else []
 
 
+def get_item_history(rating_key, media_type: str = "movie") -> list:
+    """Return playback history for one item, including partial-playback fields."""
+    data = tautulli_get("get_history", {
+        "rating_key": rating_key,
+        "media_type": media_type,
+        "length": -1,
+    })
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return data["data"]
+    return []
+
+
 def delete_tautulli_history(rating_key) -> int:
     """Delete all Tautulli play history for a rating key."""
     data = tautulli_get("get_history", {
