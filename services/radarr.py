@@ -46,8 +46,16 @@ def _titles_match(want: str, got: str) -> bool:
 
 def radarr_find_movie_by_title(instance: dict, title: str, year=None) -> dict | None:
     """Find a movie in a Radarr instance by title (and optional year)."""
-    if not title or not str(title).strip():
+    candidates = radarr_find_movie_candidates_by_title(instance, title, year)
+    if len(candidates) != 1:
         return None
+    return candidates[0]
+
+
+def radarr_find_movie_candidates_by_title(instance: dict, title: str, year=None) -> list[dict]:
+    """Return all title/year candidates without guessing between them."""
+    if not title or not str(title).strip():
+        return []
     r = requests.get(
         f"{instance['url']}/api/v3/movie",
         params={"apikey": instance["api_key"]},
@@ -78,13 +86,15 @@ def radarr_find_movie_by_title(instance: dict, title: str, year=None) -> dict | 
             continue
         candidates.append((m, y))
     if not candidates:
-        return None
-    # Prefer exact title + year match; then exact title; then any candidate
-    for m, y in candidates:
-        t = _normalize_title(m.get("title") or m.get("originalTitle") or "")
-        if t == want_title and (want_year is None or y == want_year):
-            return m
-    return candidates[0][0]
+        return []
+    # Exact title/year matches are the only safe title fallback. If there are
+    # still multiple matches, the caller must report the ambiguity.
+    exact = [
+        m for m, y in candidates
+        if _normalize_title(m.get("title") or m.get("originalTitle") or "") == want_title
+        and (want_year is None or y == want_year)
+    ]
+    return exact or [m for m, _ in candidates]
 
 
 def radarr_find_movie(instance: dict, tmdb_id=None, imdb_id=None) -> dict | None:
