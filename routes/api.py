@@ -567,6 +567,20 @@ def api_overseerr_info():
         }
         return bool(history_names & fallback_names)
 
+    def _history_timestamp(row):
+        """Return the best available watched timestamp from a history row."""
+        for field in ("date", "started", "stopped", "last_played", "timestamp", "watched_at"):
+            value = row.get(field)
+            if value in (None, ""):
+                continue
+            try:
+                timestamp = float(value)
+            except (TypeError, ValueError):
+                continue
+            if timestamp > 0:
+                return int(timestamp)
+        return None
+
     def _completion_percent(row):
         for field in ("percent_complete", "watched_status"):
             value = row.get(field)
@@ -599,9 +613,14 @@ def api_overseerr_info():
             and _history_matches_requester(row, user_id, fallback_names)
         ]
         if not matching:
-            return "not_watched"
+            return {"status": "not_watched", "last_watched": None}
         highest = max(_completion_percent(row) for row in matching)
-        return "completed" if highest >= _WATCHED_THRESHOLD else "partial"
+        timestamps = [_history_timestamp(row) for row in matching]
+        timestamps = [timestamp for timestamp in timestamps if timestamp is not None]
+        return {
+            "status": "completed" if highest >= _WATCHED_THRESHOLD else "partial",
+            "last_watched": max(timestamps) if timestamps else None,
+        }
 
     def _lookup(rk):
         result = {"rating_key": rk, "requested_by": None, "requesters": []}
@@ -701,7 +720,11 @@ def api_overseerr_info():
                 result["requesters"] = [
                     {
                         "name": name,
-                        "status": "unavailable" if history_error else _requester_status(user_id, fallback_names, history, rk),
+                        **(
+                            {"status": "unknown", "last_watched": None, "status_reason": "history_unavailable"}
+                            if history_error
+                            else _requester_status(user_id, fallback_names, history, rk)
+                        ),
                         "identity_match": match_type,
                     }
                     for name, user_id, fallback_names, match_type in requester_users

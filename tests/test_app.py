@@ -86,7 +86,7 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
         ]}
     })
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [
-        {"rating_key": "movie-1", "user_id": 1, "percent_complete": 89},
+        {"rating_key": "movie-1", "user_id": 1, "percent_complete": 89, "date": 1700000000},
         {"rating_key": "movie-1", "user_id": 2, "percent_complete": 90},
         # A stale duplicate rating key must not affect this item's status.
         {"rating_key": "old-movie-1", "user_id": 1, "percent_complete": 100},
@@ -96,8 +96,8 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
 
     assert r.status_code == 200
     assert r.get_json()["movie-1"]["requesters"] == [
-        {"name": "Alice", "status": "partial", "identity_match": "stable_id"},
-        {"name": "Bob", "status": "completed", "identity_match": "stable_id"},
+        {"name": "Alice", "status": "partial", "last_watched": 1700000000, "identity_match": "stable_id"},
+        {"name": "Bob", "status": "completed", "last_watched": None, "identity_match": "stable_id"},
     ]
 
 
@@ -144,7 +144,7 @@ def test_overseerr_info_matches_watched_show_episode_history(client, monkeypatch
 
     assert r.status_code == 200
     assert r.get_json()["show-1"]["requesters"] == [
-        {"name": "Frank", "status": "completed", "identity_match": "stable_id"}
+        {"name": "Frank", "status": "completed", "last_watched": None, "identity_match": "stable_id"}
     ]
 
 
@@ -163,7 +163,7 @@ def test_overseerr_info_handles_empty_history(client, monkeypatch):
     r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-empty"]})
 
     assert r.get_json()["movie-empty"]["requesters"] == [
-        {"name": "Casey", "status": "not_watched", "identity_match": "stable_id"}
+        {"name": "Casey", "status": "not_watched", "last_watched": None, "identity_match": "stable_id"}
     ]
 
 
@@ -183,7 +183,7 @@ def test_overseerr_info_preserves_requester_when_history_fails(client, monkeypat
 
     assert r.status_code == 200
     assert r.get_json()["movie-error"]["requesters"] == [
-        {"name": "Dana", "status": "unavailable", "identity_match": "stable_id"}
+        {"name": "Dana", "status": "unknown", "last_watched": None, "status_reason": "history_unavailable", "identity_match": "stable_id"}
     ]
 
 
@@ -235,8 +235,8 @@ def test_overseerr_info_marks_missing_and_deleted_requester_ids_unknown(client, 
     r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-identities"]})
 
     assert r.get_json()["movie-identities"]["requesters"] == [
-        {"name": "Deleted", "status": "not_watched", "identity_match": "unknown"},
-        {"name": "No ID", "status": "not_watched", "identity_match": "unknown"},
+        {"name": "Deleted", "status": "not_watched", "last_watched": None, "identity_match": "unknown"},
+        {"name": "No ID", "status": "not_watched", "last_watched": None, "identity_match": "unknown"},
     ]
 
 
@@ -264,8 +264,8 @@ def test_overseerr_info_uses_name_fallback_and_keeps_same_named_requesters(clien
     r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-same-name"]})
 
     assert r.get_json()["movie-same-name"]["requesters"] == [
-        {"name": "Shared Name", "status": "completed", "identity_match": "name_fallback"},
-        {"name": "Shared Name", "status": "completed", "identity_match": "stable_id"},
+        {"name": "Shared Name", "status": "completed", "last_watched": None, "identity_match": "name_fallback"},
+        {"name": "Shared Name", "status": "completed", "last_watched": None, "identity_match": "stable_id"},
     ]
 
 
@@ -295,7 +295,7 @@ def test_overseerr_info_resolves_seerr_requester_id_before_matching(client, monk
     r = client.post("/api/overseerr-info", json={"rating_keys": ["movie-resolved-user"]})
 
     assert r.get_json()["movie-resolved-user"]["requesters"] == [
-        {"name": "Alice", "status": "completed", "identity_match": "stable_id"},
+        {"name": "Alice", "status": "completed", "last_watched": None, "identity_match": "stable_id"},
     ]
     assert user_lookups == [7]
 
