@@ -24,6 +24,8 @@
    - Wait 20 seconds, then trigger a **Tautulli** media info refresh so Tautulli’s cache reflects Plex’s changes
    - Reload the page so the library list is up to date
 
+The planned detail-page architecture is documented in [Item detail route](docs/architecture/item-detail-route.md). The current release still uses the existing read-only item-details modal.
+
 Requester watch status uses Tautulli's configured movie watched percentage when available, with an 85% fallback. The dashboard's optional **Watched threshold** field can override that value for the current lookup (for example, 90%) without changing Tautulli. Each requester status shows the threshold and source used.
 
 **Note:** Items removed from Radarr/Sonarr/Lidarr will still appear in **Tautulli** until Plex has scanned and Tautulli has refreshed. The app triggers both automatically when Plex is configured.
