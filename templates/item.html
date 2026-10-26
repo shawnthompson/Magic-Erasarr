@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Item details - Magic-Erasarr</title>
+  <style>
+    :root { --bg:#0f1117; --surface:#181a24; --surface2:#1f2231; --border:#2a2d3e; --text:#e2e4ed; --dim:#8b8fa3; --accent:#818cf8; --danger:#f87171; --radius:8px; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; line-height:1.5; }
+    a { color:var(--accent); }
+    a:focus-visible, button:focus-visible { outline:3px solid #facc15; outline-offset:3px; }
+    header { background:var(--surface); border-bottom:1px solid var(--border); padding:1rem 2rem; }
+    header a { color:var(--text); text-decoration:none; font-weight:600; }
+    main { max-width:1100px; margin:0 auto; padding:1.5rem; }
+    .back-link { display:inline-block; margin-bottom:1.5rem; }
+    .hero { display:flex; gap:1.25rem; align-items:flex-start; margin-bottom:1.5rem; }
+    .poster { width:120px; max-height:180px; object-fit:cover; border-radius:var(--radius); background:var(--surface2); }
+    h1, h2, h3 { line-height:1.2; }
+    h1 { margin:0 0 .35rem; font-size:clamp(1.5rem,4vw,2.25rem); }
+    h2 { margin:0 0 .85rem; font-size:1.15rem; }
+    h3 { margin:0 0 .6rem; font-size:1rem; }
+    .subtitle, .dim { color:var(--dim); }
+    .status { margin-top:.75rem; }
+    .status.error { color:var(--danger); }
+    .section { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1rem; margin-top:1rem; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.8rem 1.2rem; }
+    .field dt { color:var(--dim); font-size:.8rem; }
+    .field dd { margin:.15rem 0 0; overflow-wrap:anywhere; }
+    .requester { background:var(--surface2); border-radius:var(--radius); padding:.8rem; margin-top:.7rem; }
+    .requester strong { display:block; margin-bottom:.25rem; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:.9rem; }
+    th, td { border-top:1px solid var(--border); padding:.55rem .5rem; text-align:left; vertical-align:top; }
+    th { color:var(--dim); font-weight:500; }
+    .loading { color:var(--dim); }
+    .error-box { color:var(--danger); }
+    .retry { margin-top:.6rem; background:var(--accent); color:#11131c; border:0; border-radius:var(--radius); padding:.45rem .75rem; cursor:pointer; font:inherit; }
+    footer { color:var(--dim); text-align:center; padding:2rem 1rem; font-size:.85rem; }
+    @media (max-width:600px) { header { padding:1rem; } main { padding:1rem; } .hero { gap:.8rem; } .poster { width:80px; max-height:120px; } }
+  </style>
+</head>
+<body>
+  <header><a href="/">Magic-Erasarr</a></header>
+  <main>
+    <a class="back-link" href="{{ return_url }}">Back to library</a>
+    <div id="page" aria-live="polite">
+      <div class="loading">Loading item details...</div>
+    </div>
+  </main>
+  <footer>v{{ version }} · <a href="{{ github_repo }}" target="_blank" rel="noopener noreferrer">GitHub</a></footer>
+  <script>
+    (() => {
+      const ratingKey = {{ rating_key|tojson }};
+      const page = document.querySelector('#page');
+      const posterUrl = '/api/item-poster?rating_key=' + encodeURIComponent(ratingKey);
+
+      function esc(value) {
+        const node = document.createElement('div');
+        node.textContent = value == null ? '' : String(value);
+        return node.innerHTML;
+      }
+      function value(value, fallback = 'Unknown') {
+        return value == null || value === '' ? `<span class="dim">${fallback}</span>` : esc(value);
+      }
+      function date(value) {
+        if (!value) return 'Never';
+        const parsed = new Date(Number(value) * 1000);
+        return Number.isNaN(parsed.getTime()) ? 'Unknown' : parsed.toLocaleString();
+      }
+      function bytes(value) {
+        const amount = Number(value);
+        if (!amount) return 'Unknown';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const index = Math.min(Math.floor(Math.log(amount) / Math.log(1024)), units.length - 1);
+        return `${parseFloat((amount / Math.pow(1024, index)).toFixed(1))} ${units[index]}`;
+      }
+      function statusLabel(status) {
+        return ({ completed:'Watched', partial:'Partially watched', not_watched:'Not watched', unknown:'Unknown' })[status] || 'Unknown';
+      }
+      async function json(url, options) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        return data;
+      }
+      function field(label, content) {
+        return `<div class="field"><dt>${esc(label)}</dt><dd>${content}</dd></div>`;
+      }
+      function section(title, content, id = '') {
+        return `<section class="section"${id ? ` id="${esc(id)}"` : ''}><h2>${esc(title)}</h2>${content}</section>`;
+      }
+      function requesterHtml(info) {
+        if (!info || !Array.isArray(info.requesters) || !info.requesters.length) return '<p class="dim">No requester information returned.</p>';
+        return info.requesters.map(requester => `<div class="requester"><strong>${value(requester.name)}</strong><span>${statusLabel(requester.status)}</span>${requester.last_watched ? ` · last watched ${esc(date(requester.last_watched))}` : ''}<br><span class="dim">Identity: ${esc(requester.identity_match || 'unknown')}</span></div>`).join('');
+      }
+      function viewerHtml(info) {
+        if (!info || info.error) return '<p class="dim">Viewer statistics unavailable.</p>';
+        if (!info.viewers || !info.viewers.length) return '<p class="dim">No playback recorded.</p>';
+        return `<ul>${info.viewers.map(viewer => `<li>${value(viewer.name)} — ${Number(viewer.total_plays) || 0} play${Number(viewer.total_plays) === 1 ? '' : 's'}${viewer.last_played ? `, last played ${esc(date(viewer.last_played))}` : ''}</li>`).join('')}</ul>`;
+      }
+      function episodesHtml(data) {
+        if (!data || !Array.isArray(data.seasons) || !data.seasons.length) return '<p class="dim">No episode details returned.</p>';
+        return data.seasons.filter(season => Array.isArray(season.episodes) && season.episodes.length).map(season => `<h3>${value(season.title || `Season ${season.season_number || ''}`)}</h3><div class="table-wrap"><table><thead><tr><th scope="col">Episode</th><th scope="col">Title</th><th scope="col">Viewers</th><th scope="col">Plays</th></tr></thead><tbody>${season.episodes.map(episode => `<tr><td>${value(episode.episode_number)}</td><td>${value(episode.title, 'Untitled episode')}</td><td>${episode.viewers && episode.viewers.length ? episode.viewers.map(viewer => `${esc(viewer.name)} (${Number(viewer.total_plays) || 0})`).join(', ') : '<span class="dim">None recorded</span>'}</td><td>${Number(episode.play_count) || 0}</td></tr>`).join('')}</tbody></table></div>`).join('') || '<p class="dim">No episode details returned.</p>';
+      }
+      function errorSection(title, error, retry) {
+        return section(title, `<div class="error-box">Unavailable: ${esc(error.message || 'Request failed')}</div><button class="retry" type="button">Retry</button>`).replace('<button class="retry"', `<button data-retry="${esc(retry)}" class="retry"`);
+      }
+
+      async function load() {
+        page.innerHTML = '<div class="loading">Loading item details...</div>';
+        try {
+          const item = await json('/api/item-details/' + encodeURIComponent(ratingKey));
+          const mediaType = item.media_type === 'show' ? 'TV show' : item.media_type === 'movie' ? 'Movie' : (item.media_type || 'Item');
+          page.innerHTML = `<div class="hero"><img class="poster" src="${posterUrl}" alt="${esc(item.title)} poster" onerror="this.remove()"><div><h1>${value(item.title, 'Untitled item')}</h1><div class="subtitle">${value(item.year)} · ${esc(mediaType)}</div><div class="status">Read-only details</div></div></div>`;
+          page.innerHTML += section('Library', `<dl class="grid">${field('Library', value(item.library_name))}${field('Availability', item.file_size ? 'On disk' : 'Missing or unavailable')}${field('File size', bytes(item.file_size))}${field('Added', date(item.added_at))}${field('Last played', date(item.last_played))}${field('Play count', value(item.play_count || 0))}</dl>`);
+          page.innerHTML += section('Media', `<dl class="grid">${field('Container', value(item.container))}${field('Video', value(item.video_codec))}${field('Resolution', value(item.video_resolution))}${field('Audio', value(item.audio_codec))}${field('Audio channels', value(item.audio_channels))}${field('Bitrate', item.bitrate ? `${esc(item.bitrate)} kbps` : '<span class="dim">Unknown</span>')}</dl>`);
+          const mediaTypeForApi = item.media_type === 'show' ? 'show' : 'movie';
+          const [requestersResult, viewersResult] = await Promise.allSettled([
+            json('/api/overseerr-info', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey], media_type:mediaTypeForApi }) }),
+            json('/api/tautulli-viewers', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey] }) })
+          ]);
+          const requesters = requestersResult.status === 'fulfilled' ? requestersResult.value : {};
+          const viewers = viewersResult.status === 'fulfilled' ? viewersResult.value : { [ratingKey]: { error:true } };
+          page.innerHTML += section('Requesters and watch status', requestersResult.status === 'fulfilled' ? requesterHtml(requesters[ratingKey]) : '<p class="dim">Requester information unavailable.</p>');
+          page.innerHTML += section('Playback', viewerHtml(viewers[ratingKey]));
+          if (item.media_type === 'show') {
+            try {
+              const episodes = await json('/api/tautulli-episodes?rating_key=' + encodeURIComponent(ratingKey));
+              page.innerHTML += section('Seasons and episodes', episodesHtml(episodes));
+            } catch (error) {
+              page.innerHTML += errorSection('Seasons and episodes', error, 'episodes');
+            }
+          }
+        } catch (error) {
+          page.innerHTML = `<section class="section"><h1>Item unavailable</h1><p class="error-box">${esc(error.message || 'The item could not be loaded.')}</p><p><a href="{{ return_url }}">Return to library</a></p></section>`;
+        }
+      }
+      page.addEventListener('click', event => {
+        const retry = event.target.closest('[data-retry]');
+        if (retry && retry.dataset.retry === 'episodes') load();
+      });
+      load();
+    })();
+  </script>
+</body>
+</html>

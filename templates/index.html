@@ -1013,9 +1013,16 @@
       const sectionId = item.section_id != null ? esc(String(item.section_id)) : '';
       const itemGuid = (item.guid != null && item.guid !== '') ? String(item.guid) : '';
 
+      const detailParams = new URLSearchParams();
+      if (currentLibType) detailParams.set('type', currentLibType);
+      const detailLibrary = $('#libraryFilter').value.trim();
+      if (detailLibrary) detailParams.set('library', detailLibrary);
+      detailParams.set('return', window.location.pathname + window.location.search);
+      const detailHref = '/item/' + encodeURIComponent(String(rk)) + '?' + detailParams.toString();
+
       return `<tr class="${selClass}" data-rk="${rk}" data-section-id="${sectionId}" data-guid="${esc(itemGuid)}">
         <td class="check-col"><input type="checkbox" class="row-check" data-rk="${rk}" data-title="${esc(item.title)}" data-year="${item.year || ''}" data-guid="${esc(itemGuid)}" ${isChecked} /></td>
-        <td class="title-cell"><button class="item-detail-trigger" type="button" data-rk="${esc(String(rk))}" aria-label="Show details for ${esc(item.title)}">${esc(item.title)}</button><span class="year">${item.year ? '(' + item.year + ')' : ''}</span></td>
+        <td class="title-cell"><a class="item-detail-trigger" href="${esc(detailHref)}" aria-label="Show details for ${esc(item.title)}">${esc(item.title)}</a><span class="year">${item.year ? '(' + item.year + ')' : ''}</span></td>
         <td class="dim cell-nowrap">${item.year || '—'}</td>
         <td class="dim cell-nowrap">${lastPlayed}</td>
         <td class="dim cell-nowrap">${item.play_count || 0}</td>
@@ -1794,11 +1801,6 @@
   $('#removeBtn').addEventListener('click', removeSelected);
   $('#cancelBtn').addEventListener('click', () => $('#confirmModal').classList.remove('visible'));
   $('#confirmBtn').addEventListener('click', confirmRemove);
-
-  $('#mediaBody').addEventListener('click', (event) => {
-    const trigger = event.target.closest('.item-detail-trigger');
-    if (trigger) openItemDetails(trigger.dataset.rk);
-  });
 
   function closeItemDetails() {
     detailRequestNumber++;
