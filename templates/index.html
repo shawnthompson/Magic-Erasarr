@@ -822,6 +822,7 @@
   let lastOsrInfo = null;
   let lastViewerInfo = null;
   let lastShowSummaryInfo = null;
+  let pendingLibraryFilter = null;
   const debugEnabled = {{ 'true' if debug else 'false' }};
   let seerrDisplayName = 'Seerr';
   let libraryLoaded = false;
@@ -949,7 +950,7 @@
     currentLibType = type;
     $('#librarySelect').value = currentLib;
     $('#loadBtn').disabled = false;
-    $('#libraryFilter').value = params.get('library') || '';
+    pendingLibraryFilter = params.get('library') || '';
     $('#searchInput').value = params.get('search') || '';
     $('#requestorSearchInput').value = params.get('requestor') || '';
     $('#watchedThresholdInput').value = params.get('threshold') || '';
@@ -1272,7 +1273,6 @@
 
   async function loadMedia() {
     if (!currentLib) return;
-    syncDashboardUrl();
     const body = $('#mediaBody');
     body.innerHTML = '<tr><td colspan="10"><div class="table-loading"><span class="spinner"></span> Loading...</div></td></tr>';
     try {
@@ -1283,7 +1283,9 @@
       const apiSortDir = isClientSort ? 'asc' : sortDir;
       const isCombined = currentLib.startsWith('combined:');
       const typeParam = isCombined ? currentLib.replace('combined:', '') : '';
-      const libraryFilter = $('#libraryFilter').value.trim();
+      const libraryFilter = pendingLibraryFilter !== null
+        ? pendingLibraryFilter
+        : $('#libraryFilter').value.trim();
       let url;
       if (isCombined) {
         url = `/api/library/combined?type=${encodeURIComponent(typeParam)}&length=${PAGE_SIZE}&start=${page * PAGE_SIZE}&order_column=${apiSortCol}&order_dir=${apiSortDir}`;
@@ -1316,17 +1318,19 @@
 
       if (isCombined && data.libraries && Array.isArray(data.libraries)) {
         const filterSel = $('#libraryFilter');
-        const currentVal = filterSel.value;
+        const currentVal = pendingLibraryFilter !== null ? pendingLibraryFilter : filterSel.value;
         filterSel.innerHTML = '<option value="">All libraries</option>' +
           data.libraries.map(l => {
             const safe = (l || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
             return `<option value="${safe}">${esc(l)}</option>`;
           }).join('');
         if (currentVal && data.libraries.some(l => (l || '').trim() === currentVal)) filterSel.value = currentVal;
+        pendingLibraryFilter = null;
         $('#libraryFilterWrap').style.display = '';
       } else {
         $('#libraryFilterWrap').style.display = 'none';
       }
+      syncDashboardUrl();
 
       if (!items.length) {
         body.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p>No items found.</p></div></td></tr>';
