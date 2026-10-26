@@ -545,7 +545,14 @@ def api_overseerr_info():
         matching = [
             row for row in history
             if isinstance(row, dict)
-            and (not row.get("rating_key") or str(row.get("rating_key")) == str(rating_key))
+            and (
+                not row.get("rating_key")
+                or str(row.get("rating_key")) == str(rating_key)
+                or (
+                    media_type == "show"
+                    and str(row.get("grandparent_rating_key")) == str(rating_key)
+                )
+            )
             and _history_matches_requester(row, user)
         ]
         if not matching:

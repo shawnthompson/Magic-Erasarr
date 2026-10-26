@@ -100,6 +100,52 @@ def test_overseerr_info_reports_requester_watch_status(client, monkeypatch):
     ]
 
 
+def test_tautulli_show_history_queries_episode_scope(monkeypatch):
+    """Show history uses the grandparent key and episode media type."""
+    from services import tautulli
+
+    calls = []
+
+    def fake_get(command, params):
+        calls.append((command, params))
+        return {"data": [{"rating_key": "episode-1"}]}
+
+    monkeypatch.setattr(tautulli, "tautulli_get", fake_get)
+
+    assert tautulli.get_item_history("show-1", "show") == [{"rating_key": "episode-1"}]
+    assert calls == [(
+        "get_history",
+        {"grandparent_rating_key": "show-1", "media_type": "episode", "length": -1},
+    )]
+
+
+def test_overseerr_info_matches_watched_show_episode_history(client, monkeypatch):
+    """Episode history under a show marks that show's requester as watched."""
+    from routes import api
+
+    monkeypatch.setattr(api, "OVERSEERR_API_KEY", "configured")
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guids": ["tmdb://127"]})
+    monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda *_: {
+        "mediaInfo": {"requests": [{"requestedBy": {"user_id": 6, "displayName": "Frank"}}]}
+    })
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda *_: [{
+        "rating_key": "episode-1",
+        "grandparent_rating_key": "show-1",
+        "user_id": 6,
+        "percent_complete": 100,
+    }])
+
+    r = client.post(
+        "/api/overseerr-info",
+        json={"rating_keys": ["show-1"], "media_type": "show"},
+    )
+
+    assert r.status_code == 200
+    assert r.get_json()["show-1"]["requesters"] == [
+        {"name": "Frank", "status": "completed"}
+    ]
+
+
 def test_overseerr_info_handles_empty_history(client, monkeypatch):
     """A requester with no history is explicitly marked as not watched."""
     from routes import api

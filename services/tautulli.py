@@ -167,12 +167,20 @@ def get_item_user_stats(rating_key) -> list:
 
 
 def get_item_history(rating_key, media_type: str = "movie") -> list:
-    """Return playback history for one item, including partial-playback fields."""
-    data = tautulli_get("get_history", {
-        "rating_key": rating_key,
-        "media_type": media_type,
-        "length": -1,
-    })
+    """Return playback history for one movie or show, including partial-playback fields.
+
+    Tautulli records TV playback against episodes, so show lookups must use the
+    show's grandparent rating key while asking for episode history.
+    """
+    params = {"length": -1}
+    if media_type == "show":
+        params.update({
+            "grandparent_rating_key": rating_key,
+            "media_type": "episode",
+        })
+    else:
+        params.update({"rating_key": rating_key, "media_type": media_type})
+    data = tautulli_get("get_history", params)
     if isinstance(data, list):
         return data
     if isinstance(data, dict) and isinstance(data.get("data"), list):
