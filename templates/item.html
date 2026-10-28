@@ -170,7 +170,9 @@
             : (fileSize ? 'On disk' : 'Missing or unavailable');
           const episodeField = item.media_type === 'show' ? field('Episode count', summaryAvailable ? value(summary.episode_count) : '<span class="dim">Unavailable</span>') : '';
           page.innerHTML += section('Library', `<dl class="grid">${field('Library', value(item.library_name))}${field('Availability', availability)}${episodeField}${field('File size', fileSize ? bytes(fileSize) : '<span class="dim">Not reported</span>')}${field('Added', date(item.added_at))}${field('Last played', date(item.last_played))}${field('Play count', value(item.play_count || 0))}</dl>`);
-          page.innerHTML += section('Media', `<dl class="grid">${field('Container', value(item.container))}${field('Video', value(item.video_codec))}${field('Resolution', value(item.video_resolution))}${field('Audio', value(item.audio_codec))}${field('Audio channels', value(item.audio_channels))}${field('Bitrate', item.bitrate ? `${esc(item.bitrate)} kbps` : '<span class="dim">Unknown</span>')}</dl>`);
+          if (item.media_type !== 'show') {
+            page.innerHTML += section('Media', `<dl class="grid">${field('Container', value(item.container))}${field('Video', value(item.video_codec))}${field('Resolution', value(item.video_resolution))}${field('Audio', value(item.audio_codec))}${field('Audio channels', value(item.audio_channels))}${field('Bitrate', item.bitrate ? `${esc(item.bitrate)} kbps` : '<span class="dim">Unknown</span>')}</dl>`);
+          }
           page.innerHTML += section('Requesters and watch status', requestersResult.status === 'fulfilled' ? requesterHtml(requesters[ratingKey]) : '<p class="dim">Requester information unavailable.</p>');
           page.innerHTML += section('Playback across entire series', viewerHtml(viewers[ratingKey]));
           if (item.media_type === 'show') {
