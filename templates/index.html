@@ -822,6 +822,7 @@
   let lastOsrInfo = null;
   let lastViewerInfo = null;
   let lastShowSummaryInfo = null;
+  let pendingLibraryFilter = null;
   const debugEnabled = {{ 'true' if debug else 'false' }};
   let seerrDisplayName = 'Seerr';
   let libraryLoaded = false;
@@ -920,6 +921,47 @@
     $('#loadBtn').disabled = !$('#librarySelect').value;
   }
 
+  function syncDashboardUrl() {
+    const params = new URLSearchParams();
+    if (currentLibType) params.set('type', currentLibType);
+    const libraryFilter = $('#libraryFilter').value.trim();
+    const search = $('#searchInput').value.trim();
+    const requestorSearch = $('#requestorSearchInput').value.trim();
+    if (libraryFilter) params.set('library', libraryFilter);
+    if (search) params.set('search', search);
+    if (requestorSearch) params.set('requestor', requestorSearch);
+    if (page > 0) params.set('page', String(page));
+    if (sortColumn !== 'last_played') params.set('sort', sortColumn);
+    if (sortDir !== 'asc') params.set('dir', sortDir);
+    const threshold = $('#watchedThresholdInput').value.trim();
+    if (threshold) params.set('threshold', threshold);
+    if (new URLSearchParams(window.location.search).get('test_calculating') === '1') {
+      params.set('test_calculating', '1');
+    }
+    const query = params.toString();
+    window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
+  }
+
+  function restoreDashboardState() {
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get('type');
+    if (!['movie', 'show', 'artist'].includes(type)) return false;
+    currentLib = `combined:${type}`;
+    currentLibType = type;
+    $('#librarySelect').value = currentLib;
+    $('#loadBtn').disabled = false;
+    pendingLibraryFilter = params.get('library') || '';
+    $('#searchInput').value = params.get('search') || '';
+    $('#requestorSearchInput').value = params.get('requestor') || '';
+    $('#watchedThresholdInput').value = params.get('threshold') || '';
+    const restoredPage = Number.parseInt(params.get('page') || '0', 10);
+    page = Number.isInteger(restoredPage) && restoredPage >= 0 ? restoredPage : 0;
+    const allowedSorts = ['sort_title', 'year', 'added_at', 'last_played', 'play_count', 'file_size', 'requested_by', 'library_name'];
+    sortColumn = allowedSorts.includes(params.get('sort')) ? params.get('sort') : 'last_played';
+    sortDir = params.get('dir') === 'desc' ? 'desc' : 'asc';
+    return true;
+  }
+
   // --- Media ---
   function requesterStatusLabel(status) {
     return ({
@@ -1013,9 +1055,18 @@
       const sectionId = item.section_id != null ? esc(String(item.section_id)) : '';
       const itemGuid = (item.guid != null && item.guid !== '') ? String(item.guid) : '';
 
+      const detailParams = new URLSearchParams();
+      if (currentLibType) detailParams.set('type', currentLibType);
+      const detailLibrary = $('#libraryFilter').value.trim();
+      if (detailLibrary) detailParams.set('library', detailLibrary);
+      const detailThreshold = $('#watchedThresholdInput').value.trim();
+      if (detailThreshold) detailParams.set('threshold', detailThreshold);
+      detailParams.set('return', window.location.pathname + window.location.search);
+      const detailHref = '/item/' + encodeURIComponent(String(rk)) + '?' + detailParams.toString();
+
       return `<tr class="${selClass}" data-rk="${rk}" data-section-id="${sectionId}" data-guid="${esc(itemGuid)}">
         <td class="check-col"><input type="checkbox" class="row-check" data-rk="${rk}" data-title="${esc(item.title)}" data-year="${item.year || ''}" data-guid="${esc(itemGuid)}" ${isChecked} /></td>
-        <td class="title-cell"><button class="item-detail-trigger" type="button" data-rk="${esc(String(rk))}" aria-label="Show details for ${esc(item.title)}">${esc(item.title)}</button><span class="year">${item.year ? '(' + item.year + ')' : ''}</span></td>
+        <td class="title-cell"><a class="item-detail-trigger" href="${esc(detailHref)}" aria-label="Show details for ${esc(item.title)}">${esc(item.title)}</a><span class="year">${item.year ? '(' + item.year + ')' : ''}</span></td>
         <td class="dim cell-nowrap">${item.year || '—'}</td>
         <td class="dim cell-nowrap">${lastPlayed}</td>
         <td class="dim cell-nowrap">${item.play_count || 0}</td>
@@ -1234,7 +1285,9 @@
       const apiSortDir = isClientSort ? 'asc' : sortDir;
       const isCombined = currentLib.startsWith('combined:');
       const typeParam = isCombined ? currentLib.replace('combined:', '') : '';
-      const libraryFilter = $('#libraryFilter').value.trim();
+      const libraryFilter = pendingLibraryFilter !== null
+        ? pendingLibraryFilter
+        : $('#libraryFilter').value.trim();
       let url;
       if (isCombined) {
         url = `/api/library/combined?type=${encodeURIComponent(typeParam)}&length=${PAGE_SIZE}&start=${page * PAGE_SIZE}&order_column=${apiSortCol}&order_dir=${apiSortDir}`;
@@ -1267,17 +1320,19 @@
 
       if (isCombined && data.libraries && Array.isArray(data.libraries)) {
         const filterSel = $('#libraryFilter');
-        const currentVal = filterSel.value;
+        const currentVal = pendingLibraryFilter !== null ? pendingLibraryFilter : filterSel.value;
         filterSel.innerHTML = '<option value="">All libraries</option>' +
           data.libraries.map(l => {
             const safe = (l || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
             return `<option value="${safe}">${esc(l)}</option>`;
           }).join('');
         if (currentVal && data.libraries.some(l => (l || '').trim() === currentVal)) filterSel.value = currentVal;
+        pendingLibraryFilter = null;
         $('#libraryFilterWrap').style.display = '';
       } else {
         $('#libraryFilterWrap').style.display = 'none';
       }
+      syncDashboardUrl();
 
       if (!items.length) {
         body.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p>No items found.</p></div></td></tr>';
@@ -1683,11 +1738,13 @@
     $('#searchInput').value = '';
     $('#requestorSearchWrap').style.display = 'none';
     $('#requestorSearchInput').value = '';
+    syncDashboardUrl();
   });
 
   $('#libraryFilter').addEventListener('change', function() {
     if (libraryLoaded && currentLib) {
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     }
   });
@@ -1701,24 +1758,27 @@
     lastOsrInfo = null;
     updateSelectionBar();
     updateSortHeaders();
+    syncDashboardUrl();
     loadMedia();
   });
 
   $('#searchInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && currentLib) {
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     }
   });
   $('#requestorSearchInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && currentLib) {
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     }
   });
 
-  $('#prevBtn').addEventListener('click', () => { if (page > 0) { page--; loadMedia(); } });
-  $('#nextBtn').addEventListener('click', () => { page++; loadMedia(); });
+  $('#prevBtn').addEventListener('click', () => { if (page > 0) { page--; syncDashboardUrl(); loadMedia(); } });
+  $('#nextBtn').addEventListener('click', () => { page++; syncDashboardUrl(); loadMedia(); });
 
   document.addEventListener('change', (e) => {
     if (e.target.classList.contains('row-check')) {
@@ -1783,10 +1843,12 @@
         const sorted = sortItemsByRequestedBy(lastItems, lastOsrInfo, sortDir);
         renderTable(sorted, lastOsrInfo, lastViewerInfo, lastShowSummaryInfo);
         updateSelectionBar();
+        syncDashboardUrl();
         return;
       }
 
       page = 0;
+      syncDashboardUrl();
       loadMedia();
     });
   });
@@ -1794,11 +1856,6 @@
   $('#removeBtn').addEventListener('click', removeSelected);
   $('#cancelBtn').addEventListener('click', () => $('#confirmModal').classList.remove('visible'));
   $('#confirmBtn').addEventListener('click', confirmRemove);
-
-  $('#mediaBody').addEventListener('click', (event) => {
-    const trigger = event.target.closest('.item-detail-trigger');
-    if (trigger) openItemDetails(trigger.dataset.rk);
-  });
 
   function closeItemDetails() {
     detailRequestNumber++;
@@ -1824,6 +1881,7 @@
     await initStatusBar();
     checkStatus();
     loadLibraries();
+    if (restoreDashboardState()) loadMedia();
   })();
 })();
 </script>

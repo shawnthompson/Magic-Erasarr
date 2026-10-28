@@ -102,6 +102,51 @@ def _get_show_episode_summary(rating_key):
         _summary_cache[key] = (now, summary)
     return summary
 
+
+def _unwrap_metadata(data):
+    """Normalize the common Tautulli metadata response shapes."""
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return {}
+    for key in ("metadata", "data"):
+        nested = data.get(key)
+        if isinstance(nested, list):
+            return nested[0] if nested and isinstance(nested[0], dict) else {}
+        if isinstance(nested, dict):
+            data = nested
+    return data
+
+
+@api_bp.route("/item-details/<rating_key>")
+def api_item_details(rating_key):
+    """Return read-only metadata needed to render a direct item detail page."""
+    try:
+        metadata = _unwrap_metadata(tautulli.get_metadata(rating_key))
+        if not metadata:
+            return jsonify({"error": "Item not found"}), 404
+        media_type = metadata.get("media_type") or metadata.get("type") or "unknown"
+        return jsonify({
+            "rating_key": str(metadata.get("rating_key") or rating_key),
+            "title": metadata.get("title") or metadata.get("grandparent_title") or "Untitled item",
+            "year": metadata.get("year"),
+            "media_type": media_type,
+            "library_name": metadata.get("library_name") or metadata.get("section_name"),
+            "added_at": metadata.get("added_at"),
+            "last_played": metadata.get("last_played"),
+            "play_count": metadata.get("play_count") or 0,
+            "file_size": _metadata_file_size(metadata),
+            "container": metadata.get("container"),
+            "video_codec": metadata.get("video_codec"),
+            "video_resolution": metadata.get("video_resolution"),
+            "audio_codec": metadata.get("audio_codec"),
+            "audio_channels": metadata.get("audio_channels"),
+            "bitrate": metadata.get("bitrate"),
+            "guid": metadata.get("guid") or metadata.get("grandparent_guid"),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @api_bp.route("/debug")
 def api_debug():
     """Debug: show libraries, a sample item, and its metadata resolution. Only when DEBUG=true in env."""

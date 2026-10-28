@@ -22,6 +22,63 @@ def test_index_includes_read_only_item_details_modal(client):
     assert r.status_code == 200
     assert b'id="detailModal"' in r.data
     assert b'class="item-detail-trigger"' in r.data
+    assert b"/item/" in r.data
+
+
+def test_item_detail_route_renders_direct_page(client):
+    """The item detail URL is a page route, not only a modal interaction."""
+    r = client.get("/item/item-123?return=/?type=movie")
+    assert r.status_code == 200
+    assert b"Loading item details" in r.data
+    assert b"Back to library" in r.data
+
+
+def test_item_detail_route_serializes_untrusted_return_url(client):
+    """A return path cannot escape the JavaScript string context."""
+    r = client.get("/item/missing?return=/%24%7Balert(document.domain)%7D")
+    assert r.status_code == 200
+    assert b'const returnUrl = "/${alert(document.domain)}";' in r.data
+    assert b'<a href="${esc(returnUrl)}">Return to library</a>' in r.data
+    assert b"watched_threshold:watchedThreshold" in r.data
+    assert b"/api/tautulli-show-summaries" in r.data
+
+
+def test_item_details_returns_read_only_metadata(client, monkeypatch):
+    """The direct detail page can load normalized metadata by rating key."""
+    from routes import api
+
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {
+        "metadata": {
+            "rating_key": key,
+            "title": "Example Movie",
+            "type": "movie",
+            "year": 2026,
+            "media_info": [{"parts": [{"file_size": "1234"}]}],
+            "guid": "plex://movie/123",
+        }
+    })
+
+    r = client.get("/api/item-details/item-123")
+
+    assert r.status_code == 200
+    assert r.get_json() == {
+        "rating_key": "item-123",
+        "title": "Example Movie",
+        "year": 2026,
+        "media_type": "movie",
+        "library_name": None,
+        "added_at": None,
+        "last_played": None,
+        "play_count": 0,
+        "file_size": 1234,
+        "container": None,
+        "video_codec": None,
+        "video_resolution": None,
+        "audio_codec": None,
+        "audio_channels": None,
+        "bitrate": None,
+        "guid": "plex://movie/123",
+    }
 
 
 def test_api_libraries_returns_json(client):
