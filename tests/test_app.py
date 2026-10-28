@@ -548,6 +548,8 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guid": "show-guid"})
     monkeypatch.setattr(api, "extract_ids", lambda metadata: {"tmdb": 123})
     monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda tmdb, media_type: {
+        "status": "Returning Series",
+        "seasons": [{"seasonNumber": 1}, {"seasonNumber": 2}],
         "mediaInfo": {"requests": [{
             "requestedBy": {"plexId": 7, "displayName": "Alice"},
             "seasons": [{"seasonNumber": 1}, {"seasonNumber": 2}],
@@ -583,9 +585,10 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
     assert requester["progress"] == {"completed": 0, "partial": 1, "not_watched": 0, "unknown": 0}
     assert requester["identity_match"] == "stable_id"
     assert response.get_json()["watched_threshold"] == 90
+    assert response.get_json()["series_status"] == "Continuing"
     assert response.get_json()["seasons"][0]["episodes"][0]["play_count"] == 3
     assert requester["episodes"][0]["availability"] == "available"
-    assert requester["unaired_count"] == 1
+    assert requester["unaired_count"] == 1, requester
     assert requester["unavailable_count"] == 1
     assert response.get_json()["seasons"][0]["episodes"][0]["viewers"][0]["last_played"] == 1700000000
 

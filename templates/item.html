@@ -115,7 +115,7 @@
       }
       function episodesHtml(data) {
         if (!data || !Array.isArray(data.seasons) || !data.seasons.length) return '<p class="dim">No episode details returned.</p>';
-        return data.seasons.filter(season => Array.isArray(season.episodes) && season.episodes.length).map(season => `<h3>${value(season.title || `Season ${season.season_number || ''}`)}</h3><div class="table-wrap"><table><thead><tr><th scope="col">Episode</th><th scope="col">Title</th><th scope="col">Last watched</th><th scope="col">Viewers</th><th scope="col">Plays</th></tr></thead><tbody>${season.episodes.map(episode => `<tr><td>${value(episode.episode_number)}</td><td>${value(episode.title, 'Untitled episode')}</td><td>${episode.last_played ? esc(date(episode.last_played)) : '<span class="dim">Not recorded</span>'}</td><td>${episode.viewers && episode.viewers.length ? episode.viewers.map(viewer => `${esc(viewer.name)} (${Number(viewer.total_plays) || 0}${viewer.last_played ? `, ${esc(date(viewer.last_played))}` : ''})`).join(', ') : '<span class="dim">None recorded</span>'}</td><td>${Number(episode.play_count) || 0}</td></tr>`).join('')}</tbody></table></div>`).join('') || '<p class="dim">No episode details returned.</p>';
+        return data.seasons.filter(season => Array.isArray(season.episodes) && season.episodes.length).map(season => `<h3>${value(season.title || `Season ${season.season_number || ''}`)}</h3><div class="table-wrap"><table><thead><tr><th scope="col">Episode</th><th scope="col">Title</th><th scope="col">Availability</th><th scope="col">Last watched</th><th scope="col">Viewers</th><th scope="col">Plays</th></tr></thead><tbody>${season.episodes.map(episode => `<tr><td>${value(episode.episode_number)}</td><td>${value(episode.title, 'Untitled episode')}</td><td>${availabilityLabel(episode.availability || 'available')}</td><td>${episode.last_played ? esc(date(episode.last_played)) : '<span class="dim">Not recorded</span>'}</td><td>${episode.viewers && episode.viewers.length ? episode.viewers.map(viewer => `${esc(viewer.name)} (${Number(viewer.total_plays) || 0}${viewer.last_played ? `, ${esc(date(viewer.last_played))}` : ''})`).join(', ') : '<span class="dim">None recorded</span>'}</td><td>${Number(episode.play_count) || 0}</td></tr>`).join('')}</tbody></table></div>`).join('') || '<p class="dim">No episode details returned.</p>';
       }
       function requestDetailsHtml(data) {
         if (!data || !Array.isArray(data.requesters) || !data.requesters.length) return '<p class="dim">No season requests returned.</p>';
@@ -168,6 +168,7 @@
             try {
               const thresholdQuery = watchedThreshold ? '&watched_threshold=' + encodeURIComponent(watchedThreshold) : '';
               const episodes = await json('/api/tautulli-tv-request-details?rating_key=' + encodeURIComponent(ratingKey) + thresholdQuery);
+              page.innerHTML += section('Series status', `<dl class="grid">${field('Status', value(episodes.series_status, 'Unknown'))}</dl>`);
               page.innerHTML += section('Requested-content progress', requestDetailsHtml(episodes));
               page.innerHTML += section('Seasons and episodes', episodesHtml(episodes));
             } catch (error) {

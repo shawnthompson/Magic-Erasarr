@@ -1093,6 +1093,16 @@ def _episode_air_status(air_date):
         return "unresolved"
 
 
+def _series_status_label(status):
+    """Normalize Seerr/TMDB series status to the labels used by the UI."""
+    normalized = str(status or "").strip().casefold()
+    if normalized in {"ended", "canceled", "cancelled", "finished"}:
+        return "Ended"
+    if normalized in {"continuing", "returning series", "in production", "ongoing"}:
+        return "Continuing"
+    return "Unknown"
+
+
 @api_bp.route("/tautulli-tv-request-details")
 def api_tautulli_tv_request_details():
     """Return requested-season coverage and requester progress for one TV show."""
@@ -1175,8 +1185,14 @@ def api_tautulli_tv_request_details():
             for season in (request_item.get("seasons") or [])
             if isinstance(season, dict) and season.get("seasonNumber") is not None
         })
+        catalog_season_numbers = set(requested_season_numbers)
+        for season in (media.get("seasons") or []) if isinstance(media, dict) else []:
+            if isinstance(season, dict):
+                season_number = season.get("seasonNumber") or season.get("season_number")
+                if season_number is not None:
+                    catalog_season_numbers.add(season_number)
         season_catalog = {}
-        if requested_season_numbers:
+        if catalog_season_numbers:
             def load_season(season_number):
                 try:
                     return season_number, overseerr.overseerr_find_tv_season(tmdb_id, season_number)
@@ -1184,7 +1200,7 @@ def api_tautulli_tv_request_details():
                     return season_number, None
 
             with ThreadPoolExecutor(max_workers=4) as pool:
-                for season_number, season_data in pool.map(load_season, requested_season_numbers):
+                for season_number, season_data in pool.map(load_season, sorted(catalog_season_numbers)):
                     season_catalog[season_number] = season_data
 
         tautulli_by_episode = {
@@ -1206,6 +1222,34 @@ def api_tautulli_tv_request_details():
                 for item in episodes
                 if isinstance(item, dict) and (item.get("episodeNumber") or item.get("episode_number")) is not None
             ]
+
+        season_by_number = {
+            season.get("season_number"): season
+            for season in seasons
+            if season.get("season_number") is not None
+        }
+        for season_number, catalog_episodes in catalog_by_season.items():
+            season = season_by_number.get(season_number)
+            if season is None:
+                season = {"season_number": season_number, "title": f"Season {season_number}", "episodes": []}
+                seasons.append(season)
+                season_by_number[season_number] = season
+            known_numbers = {episode.get("episode_number") for episode in season["episodes"]}
+            for expected in catalog_episodes:
+                if expected.get("episode_number") in known_numbers:
+                    continue
+                season["episodes"].append({
+                    "rating_key": None,
+                    "title": expected.get("title") or "Untitled episode",
+                    "episode_number": expected.get("episode_number"),
+                    "air_date": expected.get("air_date"),
+                    "availability": _episode_air_status(expected.get("air_date")),
+                    "last_played": None,
+                    "viewers": [],
+                    "play_count": 0,
+                })
+            season["episodes"].sort(key=lambda episode: episode.get("episode_number") or 0)
+        seasons.sort(key=lambda season: season.get("season_number") or 0)
 
         tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
         if not tautulli_users:
@@ -1284,8 +1328,12 @@ def api_tautulli_tv_request_details():
                 "unresolved_count": sum(1 for item in statuses if item["availability"] == "unresolved"),
                 "progress": counts, "whole_series_progress": whole_series_counts,
             })
+        series_status = _series_status_label(
+            (media or {}).get("status") if isinstance(media, dict) else metadata.get("status")
+        )
         return jsonify({"rating_key": str(rating_key), "seasons": seasons, "requesters": result_requesters,
-                        "watched_threshold": threshold, "whole_series": {"episode_count": len(all_episodes)}})
+                        "series_status": series_status, "watched_threshold": threshold,
+                        "whole_series": {"episode_count": len(all_episodes)}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
