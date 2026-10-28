@@ -36,6 +36,9 @@
     .loading { color:var(--dim); }
     .error-box { color:var(--danger); }
     .retry { margin-top:.6rem; background:var(--accent); color:#11131c; border:0; border-radius:var(--radius); padding:.45rem .75rem; cursor:pointer; font:inherit; }
+    .progress { display:grid; gap:.35rem; margin:.5rem 0 .8rem; }
+    .progress-bar { height:.55rem; background:var(--bg); border-radius:999px; overflow:hidden; }
+    .progress-bar span { display:block; height:100%; background:var(--accent); }
     footer { color:var(--dim); text-align:center; padding:2rem 1rem; font-size:.85rem; }
     @media (max-width:600px) { header { padding:1rem; } main { padding:1rem; } .hero { gap:.8rem; } .poster { width:80px; max-height:120px; } }
   </style>
@@ -111,6 +114,20 @@
         if (!data || !Array.isArray(data.seasons) || !data.seasons.length) return '<p class="dim">No episode details returned.</p>';
         return data.seasons.filter(season => Array.isArray(season.episodes) && season.episodes.length).map(season => `<h3>${value(season.title || `Season ${season.season_number || ''}`)}</h3><div class="table-wrap"><table><thead><tr><th scope="col">Episode</th><th scope="col">Title</th><th scope="col">Viewers</th><th scope="col">Plays</th></tr></thead><tbody>${season.episodes.map(episode => `<tr><td>${value(episode.episode_number)}</td><td>${value(episode.title, 'Untitled episode')}</td><td>${episode.viewers && episode.viewers.length ? episode.viewers.map(viewer => `${esc(viewer.name)} (${Number(viewer.total_plays) || 0})`).join(', ') : '<span class="dim">None recorded</span>'}</td><td>${Number(episode.play_count) || 0}</td></tr>`).join('')}</tbody></table></div>`).join('') || '<p class="dim">No episode details returned.</p>';
       }
+      function requestDetailsHtml(data) {
+        if (!data || !Array.isArray(data.requesters) || !data.requesters.length) return '<p class="dim">No season requests returned.</p>';
+        return data.requesters.map(requester => {
+          const counts = requester.progress || {};
+          const total = requester.available_count || 0;
+          const watched = (counts.completed || 0) + (counts.partial || 0);
+          const percent = total ? Math.round(watched / total * 100) : 0;
+          const seasons = requester.requested_seasons && requester.requested_seasons.length ? requester.requested_seasons.join(', ') : 'Unknown';
+          const unavailable = requester.missing_seasons && requester.missing_seasons.length ? `; unavailable seasons: ${requester.missing_seasons.join(', ')}` : '';
+          const episodeRows = (requester.episodes || []).map(episode => `<tr><td>S${value(episode.season_number)}E${value(episode.episode_number)}</td><td>${statusLabel(episode.status)}</td><td>${episode.last_watched ? esc(date(episode.last_watched)) : '<span class="dim">Not recorded</span>'}</td></tr>`).join('');
+          const episodeTable = episodeRows ? `<div class="table-wrap"><table><caption class="dim">Requested episodes</caption><thead><tr><th scope="col">Episode</th><th scope="col">Status</th><th scope="col">Last watched</th></tr></thead><tbody>${episodeRows}</tbody></table></div>` : '';
+          return `<div class="requester"><strong>${value(requester.name)}</strong><span class="dim">Identity: ${esc(requester.identity_match || 'unknown')}</span><br><span>Requested seasons: ${esc(seasons)}${esc(unavailable)}</span><div class="progress"><span>${watched}/${total} available episodes watched or partial (${percent}%)</span><div class="progress-bar" role="progressbar" aria-label="${esc(requester.name)} requested-content progress" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><span style="width:${percent}%"></span></div></div><span class="dim">Watched: ${counts.completed || 0} · Partial: ${counts.partial || 0} · Not watched: ${counts.not_watched || 0} · Unknown: ${counts.unknown || 0}</span>${episodeTable}</div>`;
+        }).join('');
+      }
       function errorSection(title, error, retry) {
         return section(title, `<div class="error-box">Unavailable: ${esc(error.message || 'Request failed')}</div><button class="retry" type="button">Retry</button>`).replace('<button class="retry"', `<button data-retry="${esc(retry)}" class="retry"`);
       }
@@ -142,10 +159,12 @@
           page.innerHTML += section('Library', `<dl class="grid">${field('Library', value(item.library_name))}${field('Availability', availability)}${episodeField}${field('File size', fileSize ? bytes(fileSize) : '<span class="dim">Not reported</span>')}${field('Added', date(item.added_at))}${field('Last played', date(item.last_played))}${field('Play count', value(item.play_count || 0))}</dl>`);
           page.innerHTML += section('Media', `<dl class="grid">${field('Container', value(item.container))}${field('Video', value(item.video_codec))}${field('Resolution', value(item.video_resolution))}${field('Audio', value(item.audio_codec))}${field('Audio channels', value(item.audio_channels))}${field('Bitrate', item.bitrate ? `${esc(item.bitrate)} kbps` : '<span class="dim">Unknown</span>')}</dl>`);
           page.innerHTML += section('Requesters and watch status', requestersResult.status === 'fulfilled' ? requesterHtml(requesters[ratingKey]) : '<p class="dim">Requester information unavailable.</p>');
-          page.innerHTML += section('Playback', viewerHtml(viewers[ratingKey]));
+          page.innerHTML += section('Playback across entire series', viewerHtml(viewers[ratingKey]));
           if (item.media_type === 'show') {
             try {
-              const episodes = await json('/api/tautulli-episodes?rating_key=' + encodeURIComponent(ratingKey));
+              const thresholdQuery = watchedThreshold ? '&watched_threshold=' + encodeURIComponent(watchedThreshold) : '';
+              const episodes = await json('/api/tautulli-tv-request-details?rating_key=' + encodeURIComponent(ratingKey) + thresholdQuery);
+              page.innerHTML += section('Requested-content progress', requestDetailsHtml(episodes));
               page.innerHTML += section('Seasons and episodes', episodesHtml(episodes));
             } catch (error) {
               page.innerHTML += errorSection('Seasons and episodes', error, 'episodes');

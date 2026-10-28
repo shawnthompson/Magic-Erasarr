@@ -118,6 +118,44 @@ def _unwrap_metadata(data):
     return data
 
 
+def _history_timestamp(row):
+    for field in ("date", "started", "stopped", "last_played", "timestamp", "watched_at"):
+        value = row.get(field)
+        if value in (None, ""):
+            continue
+        try:
+            timestamp = float(value)
+        except (TypeError, ValueError):
+            continue
+        if timestamp > 0:
+            return int(timestamp)
+    return None
+
+
+def _completion_percent(row):
+    for field in ("percent_complete", "watched_status"):
+        value = row.get(field)
+        if isinstance(value, str):
+            value = value.strip().casefold()
+            if value in ("completed", "complete", "watched"):
+                return 100
+            if value in ("not_watched", "unwatched"):
+                return 0
+        try:
+            return max(0, min(100, float(value)))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _identity_values(user):
+    return {
+        str(user.get(field) or "").strip().casefold()
+        for field in ("displayName", "display_name", "plexUsername", "username", "friendly_name", "email")
+        if user.get(field)
+    }
+
+
 @api_bp.route("/item-details/<rating_key>")
 def api_item_details(rating_key):
     """Return read-only metadata needed to render a direct item detail page."""
@@ -1007,6 +1045,159 @@ def api_tautulli_episodes():
                 "episodes": episodes,
             })
         return jsonify({"rating_key": str(rating_key), "seasons": seasons})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _tv_request_status(history, episode, user_id, fallback_names, threshold):
+    """Return a conservative playback state for one requester and episode."""
+    if history is None or user_id is None and not fallback_names:
+        return {"status": "unknown", "last_watched": None}
+    matches = []
+    for row in history:
+        if not isinstance(row, dict):
+            continue
+        if row.get("rating_key") and str(row.get("rating_key")) != str(episode.get("rating_key")):
+            continue
+        history_id = row.get("user_id")
+        if user_id is not None:
+            if history_id is None or str(history_id) != str(user_id):
+                continue
+        else:
+            names = {
+                str(row.get(field) or "").strip().casefold()
+                for field in ("friendly_name", "user", "username", "display_name")
+            }
+            if not names & fallback_names:
+                continue
+        matches.append(row)
+    if not matches:
+        return {"status": "not_watched", "last_watched": None}
+    percentages = [_completion_percent(row) for row in matches]
+    timestamps = [_history_timestamp(row) for row in matches]
+    timestamps = [value for value in timestamps if value is not None]
+    return {
+        "status": "completed" if max(percentages) >= threshold else "partial",
+        "last_watched": max(timestamps) if timestamps else None,
+    }
+
+
+@api_bp.route("/tautulli-tv-request-details")
+def api_tautulli_tv_request_details():
+    """Return requested-season coverage and requester progress for one TV show."""
+    rating_key = request.args.get("rating_key")
+    if not rating_key:
+        return jsonify({"error": "rating_key required"}), 400
+    try:
+        metadata = _unwrap_metadata(tautulli.get_metadata(rating_key))
+        tmdb_id = extract_ids(metadata).get("tmdb")
+        show_data = tautulli.get_children_metadata(rating_key, "show")
+        seasons = []
+        all_episodes = []
+        for season in show_data.get("children_list", []) if isinstance(show_data, dict) else []:
+            if not isinstance(season, dict) or not season.get("rating_key"):
+                continue
+            season_number = season.get("parent_index") or season.get("index")
+            season_data = tautulli.get_children_metadata(season["rating_key"], "season")
+            episodes = []
+            for episode in season_data.get("children_list", []) if isinstance(season_data, dict) else []:
+                if not isinstance(episode, dict) or not episode.get("rating_key"):
+                    continue
+                item = {
+                    "rating_key": str(episode["rating_key"]),
+                    "season_number": season_number,
+                    "episode_number": episode.get("media_index") or episode.get("episode_num") or episode.get("index"),
+                    "title": episode.get("title") or episode.get("full_title") or "Untitled episode",
+                    "air_date": episode.get("originally_available_at") or episode.get("air_date") or episode.get("airdate"),
+                    "viewers": [],
+                    "play_count": 0,
+                }
+                for row in _cached_tautulli_viewers(item["rating_key"]):
+                    if isinstance(row, dict) and (row.get("friendly_name") or row.get("username")):
+                        try:
+                            item["play_count"] += int(row.get("total_plays") or 0)
+                        except (TypeError, ValueError):
+                            pass
+                        item["viewers"].append({
+                            "name": row.get("friendly_name") or row.get("username"),
+                            "total_plays": row.get("total_plays", 0),
+                            "last_played": row.get("last_played") or row.get("last_watched"),
+                        })
+                episodes.append(item)
+                all_episodes.append(item)
+            seasons.append({"season_number": season_number, "title": season.get("title") or "Season", "episodes": episodes})
+
+        try:
+            history = tautulli.get_item_history(rating_key, "show")
+        except Exception:
+            history = None
+
+        threshold = request.args.get("watched_threshold", type=float)
+        if threshold is None or not 0 <= threshold <= 100:
+            threshold = _DEFAULT_WATCHED_THRESHOLD
+            try:
+                settings = tautulli.get_settings()
+                section = next((value for key, value in settings.items() if str(key).casefold() == "monitoring" and isinstance(value, dict)), {})
+                configured = next((value for key, value in section.items() if str(key).casefold() == "movie_watched_percent"), None)
+                configured = float(configured)
+                if 0 <= configured <= 100:
+                    threshold = configured
+            except Exception:
+                pass
+
+        if not tmdb_id:
+            return jsonify({"rating_key": str(rating_key), "seasons": seasons, "requesters": [],
+                            "whole_series": {"episode_count": len(all_episodes)}, "error": "TMDB ID unavailable"})
+        try:
+            media = overseerr.overseerr_find_media(tmdb_id, "show") if OVERSEERR_API_KEY else None
+        except Exception:
+            media = None
+        media_info = media.get("mediaInfo") if isinstance(media, dict) else None
+        requests_for_show = media_info.get("requests") if isinstance(media_info, dict) else []
+        requests_for_show = [item for item in requests_for_show if isinstance(item, dict)]
+
+        tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
+        if not tautulli_users:
+            try:
+                tautulli_users = [user for user in tautulli.get_users() if isinstance(user, dict)]
+            except Exception:
+                tautulli_users = []
+        users_by_id = {str(user.get("user_id")): user for user in tautulli_users if user.get("user_id") is not None}
+        result_requesters = []
+        for request_item in requests_for_show:
+            user = request_item.get("requestedBy") or {}
+            if user.get("plexId") is None and user.get("id") is not None:
+                user = overseerr.overseerr_find_user(user["id"]) or user
+            name = user.get("displayName") or user.get("plexUsername") or user.get("email") or "Unknown requester"
+            plex_id = user.get("plexId")
+            tautulli_user = users_by_id.get(str(plex_id)) if plex_id is not None else None
+            fallback_names = _identity_values(user)
+            if tautulli_user:
+                user_id, identity = tautulli_user.get("user_id"), "stable_id"
+            elif plex_id is None:
+                match = next((candidate for candidate in tautulli_users if _identity_values(candidate) & fallback_names), None)
+                user_id, identity = (match.get("user_id"), "name_fallback") if match else (None, "unknown")
+            else:
+                user_id, identity = None, "unknown"
+            requested_seasons = {
+                item.get("seasonNumber") for item in (request_item.get("seasons") or [])
+                if isinstance(item, dict) and item.get("seasonNumber") is not None
+            }
+            requested = [episode for episode in all_episodes if episode.get("season_number") in requested_seasons]
+            missing_seasons = sorted(requested_seasons - {episode.get("season_number") for episode in all_episodes})
+            statuses = []
+            for episode in requested:
+                status = _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
+                statuses.append({"rating_key": episode["rating_key"], "season_number": episode["season_number"], "episode_number": episode["episode_number"], **status})
+            counts = {key: sum(1 for item in statuses if item["status"] == key) for key in ("completed", "partial", "not_watched", "unknown")}
+            result_requesters.append({
+                "name": name, "identity_match": identity,
+                "requested_seasons": sorted(requested_seasons), "missing_seasons": missing_seasons,
+                "episodes": statuses, "available_count": len(requested), "unavailable_count": len(missing_seasons),
+                "progress": counts,
+            })
+        return jsonify({"rating_key": str(rating_key), "seasons": seasons, "requesters": result_requesters,
+                        "watched_threshold": threshold, "whole_series": {"episode_count": len(all_episodes)}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
