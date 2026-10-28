@@ -1109,6 +1109,14 @@ def _tv_episode_key(season_number, episode_number):
     return (str(season_number), str(episode_number))
 
 
+def _season_sort_key(season_number):
+    """Sort numeric seasons before named seasons without comparing unlike types."""
+    try:
+        return (0, int(season_number))
+    except (TypeError, ValueError):
+        return (1, str(season_number or "").casefold())
+
+
 def _season_number(season):
     """Return a season number even when Tautulli only supplies a title."""
     for field in ("parent_index", "index", "season_number", "seasonNumber"):
@@ -1217,7 +1225,7 @@ def api_tautulli_tv_request_details():
                     return season_number, None
 
             with ThreadPoolExecutor(max_workers=4) as pool:
-                for season_number, season_data in pool.map(load_season, sorted(catalog_season_numbers)):
+                for season_number, season_data in pool.map(load_season, sorted(catalog_season_numbers, key=_season_sort_key)):
                     season_catalog[season_number] = season_data
 
         tautulli_by_episode = {
@@ -1267,7 +1275,7 @@ def api_tautulli_tv_request_details():
                     "play_count": 0,
                 })
             season["episodes"].sort(key=lambda episode: episode.get("episode_number") or 0)
-        seasons.sort(key=lambda season: season.get("season_number") or 0)
+        seasons.sort(key=lambda season: _season_sort_key(season.get("season_number")))
 
         tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
         if not tautulli_users:
@@ -1298,7 +1306,7 @@ def api_tautulli_tv_request_details():
             }
             requested_catalog = []
             missing_seasons = []
-            for season_number in sorted(requested_seasons):
+            for season_number in sorted(requested_seasons, key=_season_sort_key):
                 season_episodes = catalog_by_season.get(str(season_number))
                 if season_episodes is None:
                     fallback = [episode for episode in all_episodes if episode.get("season_number") == season_number]
@@ -1339,7 +1347,7 @@ def api_tautulli_tv_request_details():
             }
             result_requesters.append({
                 "name": name, "identity_match": identity,
-                "requested_seasons": sorted(requested_seasons), "missing_seasons": missing_seasons,
+                "requested_seasons": sorted(requested_seasons, key=_season_sort_key), "missing_seasons": sorted(missing_seasons, key=_season_sort_key),
                 "episodes": statuses, "available_count": sum(1 for item in statuses if item["availability"] == "available"),
                 "unavailable_count": sum(1 for item in statuses if item["availability"] == "unavailable"),
                 "unaired_count": sum(1 for item in statuses if item["availability"] == "unaired"),

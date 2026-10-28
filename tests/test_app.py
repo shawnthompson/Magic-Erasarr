@@ -615,6 +615,13 @@ def test_tv_request_details_keeps_tautulli_episodes_without_tmdb_id(client, monk
     assert response.get_json()["seasons"][0]["episodes"][0]["title"] == "Pilot"
 
 
+def test_season_sort_key_handles_numeric_and_named_seasons():
+    """Mixed API season values sort without comparing int and string directly."""
+    from routes import api
+
+    assert sorted(["specials", 2, "1"], key=api._season_sort_key) == ["1", 2, "specials"]
+
+
 def test_show_episode_summary_counts_episodes_and_file_sizes(monkeypatch):
     """TV summaries combine episode counts and full-metadata file sizes."""
     from routes import api
