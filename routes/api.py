@@ -1204,12 +1204,12 @@ def api_tautulli_tv_request_details():
         requests_for_show = media_info.get("requests") if isinstance(media_info, dict) else []
         requests_for_show = [item for item in requests_for_show if isinstance(item, dict)]
 
-        requested_season_numbers = sorted({
+        requested_season_numbers = {
             season.get("seasonNumber")
             for request_item in requests_for_show
             for season in (request_item.get("seasons") or [])
             if isinstance(season, dict) and season.get("seasonNumber") is not None
-        })
+        }
         catalog_season_numbers = set(requested_season_numbers)
         for season in (media.get("seasons") or []) if isinstance(media, dict) else []:
             if isinstance(season, dict):
@@ -1274,7 +1274,7 @@ def api_tautulli_tv_request_details():
                     "viewers": [],
                     "play_count": 0,
                 })
-            season["episodes"].sort(key=lambda episode: episode.get("episode_number") or 0)
+            season["episodes"].sort(key=lambda episode: _season_sort_key(episode.get("episode_number")))
         seasons.sort(key=lambda season: _season_sort_key(season.get("season_number")))
 
         tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
