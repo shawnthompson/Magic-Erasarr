@@ -23,6 +23,9 @@
     .subtitle, .dim { color:var(--dim); }
     .status { margin-top:.75rem; }
     .status.error { color:var(--danger); }
+    .series-status { display:inline-block; margin-left:.5rem; padding:.15rem .5rem; border:1px solid var(--border); border-radius:999px; font-size:.78rem; font-weight:600; }
+    .series-status.continuing { color:#86efac; border-color:#166534; background:#052e16; }
+    .series-status.ended { color:var(--dim); }
     .section { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1rem; margin-top:1rem; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.8rem 1.2rem; }
     .field dt { color:var(--dim); font-size:.8rem; }
@@ -141,7 +144,7 @@
         try {
           const item = await json('/api/item-details/' + encodeURIComponent(ratingKey));
           const mediaType = item.media_type === 'show' ? 'TV show' : item.media_type === 'movie' ? 'Movie' : (item.media_type || 'Item');
-          page.innerHTML = `<div class="hero"><img class="poster" src="${posterUrl}" alt="${esc(item.title)} poster" onerror="this.remove()"><div><h1>${value(item.title, 'Untitled item')}</h1><div class="subtitle">${value(item.year)} · ${esc(mediaType)}</div><div class="status">Read-only details</div></div></div>`;
+          page.innerHTML = `<div class="hero"><img class="poster" src="${posterUrl}" alt="${esc(item.title)} poster" onerror="this.remove()"><div><h1>${value(item.title, 'Untitled item')}</h1><div class="subtitle">${value(item.year)} · ${esc(mediaType)}</div><div class="status">Read-only details${item.media_type === 'show' ? ' <span id="seriesStatus" class="series-status" aria-label="Series status">Loading status...</span>' : ''}</div></div></div>`;
           const mediaTypeForApi = item.media_type === 'show' ? 'show' : 'movie';
           const [requestersResult, viewersResult, summaryResult] = await Promise.allSettled([
             json('/api/overseerr-info', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey], media_type:mediaTypeForApi, watched_threshold:watchedThreshold }) }),
@@ -168,10 +171,21 @@
             try {
               const thresholdQuery = watchedThreshold ? '&watched_threshold=' + encodeURIComponent(watchedThreshold) : '';
               const episodes = await json('/api/tautulli-tv-request-details?rating_key=' + encodeURIComponent(ratingKey) + thresholdQuery);
+              const seriesStatus = document.querySelector('#seriesStatus');
+              if (seriesStatus) {
+                const status = episodes.series_status || 'Unknown';
+                seriesStatus.textContent = status;
+                seriesStatus.className = `series-status ${status.toLowerCase()}`;
+              }
               page.innerHTML += section('Series status', `<dl class="grid">${field('Status', value(episodes.series_status, 'Unknown'))}</dl>`);
               page.innerHTML += section('Requested-content progress', requestDetailsHtml(episodes));
               page.innerHTML += section('Seasons and episodes', episodesHtml(episodes));
             } catch (error) {
+              const seriesStatus = document.querySelector('#seriesStatus');
+              if (seriesStatus) {
+                seriesStatus.textContent = 'Unknown';
+                seriesStatus.className = 'series-status unknown';
+              }
               page.innerHTML += errorSection('Seasons and episodes', error, 'episodes');
             }
           }

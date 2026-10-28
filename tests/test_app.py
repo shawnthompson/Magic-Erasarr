@@ -41,6 +41,7 @@ def test_item_detail_route_serializes_untrusted_return_url(client):
     assert b'<a href="${esc(returnUrl)}">Return to library</a>' in r.data
     assert b"watched_threshold:watchedThreshold" in r.data
     assert b"/api/tautulli-show-summaries" in r.data
+    assert b'id="seriesStatus"' in r.data
 
 
 def test_item_details_returns_read_only_metadata(client, monkeypatch):
