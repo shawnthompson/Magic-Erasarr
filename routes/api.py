@@ -1276,6 +1276,18 @@ def api_tautulli_tv_request_details():
                 })
             season["episodes"].sort(key=lambda episode: _season_sort_key(episode.get("episode_number")))
         seasons.sort(key=lambda season: _season_sort_key(season.get("season_number")))
+        future_air_dates = []
+        for season in seasons:
+            for episode in season.get("episodes", []):
+                air_date = episode.get("air_date")
+                if not air_date:
+                    continue
+                try:
+                    parsed_air_date = date.fromisoformat(str(air_date)[:10])
+                except (TypeError, ValueError):
+                    continue
+                if parsed_air_date > date.today():
+                    future_air_dates.append(parsed_air_date.isoformat())
 
         tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
         if not tautulli_users:
@@ -1359,6 +1371,7 @@ def api_tautulli_tv_request_details():
         )
         return jsonify({"rating_key": str(rating_key), "seasons": seasons, "requesters": result_requesters,
                         "series_status": series_status, "watched_threshold": threshold,
+                        "next_air_date": min(future_air_dates) if future_air_dates else None,
                         "whole_series": {"episode_count": len(all_episodes)}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

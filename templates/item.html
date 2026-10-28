@@ -26,6 +26,7 @@
     .series-status { display:inline-block; margin-left:.5rem; padding:.15rem .5rem; border:1px solid var(--border); border-radius:999px; font-size:.78rem; font-weight:600; }
     .series-status.continuing { color:#86efac; border-color:#166534; background:#052e16; }
     .series-status.ended { color:#fff; border-color:#b91c1c; background:#b91c1c; }
+    .next-air-date { display:inline-block; margin-left:.5rem; color:var(--dim); font-size:.82rem; }
     .section { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1rem; margin-top:1rem; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.8rem 1.2rem; }
     .field dt { color:var(--dim); font-size:.8rem; }
@@ -89,6 +90,11 @@
       function availabilityLabel(status) {
         return ({ available:'Available', unavailable:'Unavailable', unaired:'Unaired', unresolved:'Unresolved' })[status] || 'Unknown';
       }
+      function airDate(value) {
+        if (!value) return 'Not reported';
+        const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+        return Number.isNaN(parsed.getTime()) ? 'Unknown' : parsed.toLocaleDateString();
+      }
       function thresholdSourceLabel(source) {
         return source === 'dashboard_override' ? 'dashboard override' : source === 'tautulli' ? 'Tautulli setting' : '85% fallback';
       }
@@ -118,7 +124,7 @@
       }
       function episodesHtml(data) {
         if (!data || !Array.isArray(data.seasons) || !data.seasons.length) return '<p class="dim">No episode details returned.</p>';
-        return data.seasons.filter(season => Array.isArray(season.episodes) && season.episodes.length).map(season => `<h3>${value(season.title || `Season ${season.season_number || ''}`)}</h3><div class="table-wrap"><table><thead><tr><th scope="col">Episode</th><th scope="col">Title</th><th scope="col">Availability</th><th scope="col">Last watched</th><th scope="col">Viewers</th><th scope="col">Plays</th></tr></thead><tbody>${season.episodes.map(episode => `<tr><td>${value(episode.episode_number)}</td><td>${value(episode.title, 'Untitled episode')}</td><td>${availabilityLabel(episode.availability || 'available')}</td><td>${episode.last_played ? esc(date(episode.last_played)) : '<span class="dim">Not recorded</span>'}</td><td>${episode.viewers && episode.viewers.length ? episode.viewers.map(viewer => `${esc(viewer.name)} (${Number(viewer.total_plays) || 0}${viewer.last_played ? `, ${esc(date(viewer.last_played))}` : ''})`).join(', ') : '<span class="dim">None recorded</span>'}</td><td>${Number(episode.play_count) || 0}</td></tr>`).join('')}</tbody></table></div>`).join('') || '<p class="dim">No episode details returned.</p>';
+        return data.seasons.filter(season => Array.isArray(season.episodes) && season.episodes.length).map(season => `<h3>${value(season.title || `Season ${season.season_number || ''}`)}</h3><div class="table-wrap"><table><thead><tr><th scope="col">Episode</th><th scope="col">Title</th><th scope="col">Air date</th><th scope="col">Last watched</th><th scope="col">Viewers</th><th scope="col">Plays</th></tr></thead><tbody>${season.episodes.map(episode => `<tr><td>${value(episode.episode_number)}</td><td>${value(episode.title, 'Untitled episode')}</td><td>${esc(airDate(episode.air_date))}</td><td>${episode.last_played ? esc(date(episode.last_played)) : '<span class="dim">Not recorded</span>'}</td><td>${episode.viewers && episode.viewers.length ? episode.viewers.map(viewer => `${esc(viewer.name)} (${Number(viewer.total_plays) || 0}${viewer.last_played ? `, ${esc(date(viewer.last_played))}` : ''})`).join(', ') : '<span class="dim">None recorded</span>'}</td><td>${Number(episode.play_count) || 0}</td></tr>`).join('')}</tbody></table></div>`).join('') || '<p class="dim">No episode details returned.</p>';
       }
       function requestDetailsHtml(data) {
         if (!data || !Array.isArray(data.requesters) || !data.requesters.length) return '<p class="dim">No season requests returned.</p>';
@@ -144,7 +150,7 @@
         try {
           const item = await json('/api/item-details/' + encodeURIComponent(ratingKey));
           const mediaType = item.media_type === 'show' ? 'TV show' : item.media_type === 'movie' ? 'Movie' : (item.media_type || 'Item');
-          page.innerHTML = `<div class="hero"><img class="poster" src="${posterUrl}" alt="${esc(item.title)} poster" onerror="this.remove()"><div><h1>${value(item.title, 'Untitled item')}</h1><div class="subtitle">${value(item.year)} · ${esc(mediaType)}</div><div class="status">Read-only details${item.media_type === 'show' ? ' <span id="seriesStatus" class="series-status" aria-label="Series status">Loading status...</span>' : ''}</div></div></div>`;
+          page.innerHTML = `<div class="hero"><img class="poster" src="${posterUrl}" alt="${esc(item.title)} poster" onerror="this.remove()"><div><h1>${value(item.title, 'Untitled item')}</h1><div class="subtitle">${value(item.year)} · ${esc(mediaType)}</div><div class="status">Read-only details${item.media_type === 'show' ? ' <span id="seriesStatus" class="series-status" aria-label="Series status">Loading status...</span><span id="nextAirDate" class="next-air-date" aria-label="Next air date">Next air date: Loading...</span>' : ''}</div></div></div>`;
           const mediaTypeForApi = item.media_type === 'show' ? 'show' : 'movie';
           const [requestersResult, viewersResult, summaryResult] = await Promise.allSettled([
             json('/api/overseerr-info', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey], media_type:mediaTypeForApi, watched_threshold:watchedThreshold }) }),
@@ -177,6 +183,8 @@
                 seriesStatus.textContent = status;
                 seriesStatus.className = `series-status ${status.toLowerCase()}`;
               }
+              const nextAirDate = document.querySelector('#nextAirDate');
+              if (nextAirDate) nextAirDate.textContent = `Next air date: ${airDate(episodes.next_air_date)}`;
               page.innerHTML += section('Series status', `<dl class="grid">${field('Status', value(episodes.series_status, 'Unknown'))}</dl>`);
               page.innerHTML += section('Requested-content progress', requestDetailsHtml(episodes));
               page.innerHTML += section('Seasons and episodes', episodesHtml(episodes));
@@ -186,6 +194,8 @@
                 seriesStatus.textContent = 'Unknown';
                 seriesStatus.className = 'series-status unknown';
               }
+              const nextAirDate = document.querySelector('#nextAirDate');
+              if (nextAirDate) nextAirDate.textContent = 'Next air date: Unknown';
               page.innerHTML += errorSection('Seasons and episodes', error, 'episodes');
             }
           }

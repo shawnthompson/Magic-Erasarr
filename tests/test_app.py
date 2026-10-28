@@ -42,6 +42,7 @@ def test_item_detail_route_serializes_untrusted_return_url(client):
     assert b"watched_threshold:watchedThreshold" in r.data
     assert b"/api/tautulli-show-summaries" in r.data
     assert b'id="seriesStatus"' in r.data
+    assert b'id="nextAirDate"' in r.data
 
 
 def test_item_details_returns_read_only_metadata(client, monkeypatch):
@@ -587,6 +588,7 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
     assert requester["identity_match"] == "stable_id"
     assert response.get_json()["watched_threshold"] == 90
     assert response.get_json()["series_status"] == "Continuing"
+    assert response.get_json()["next_air_date"] == "2027-01-01"
     assert response.get_json()["seasons"][0]["episodes"][0]["play_count"] == 3
     assert requester["episodes"][0]["availability"] == "available"
     assert requester["unaired_count"] == 1, requester
