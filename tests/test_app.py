@@ -55,7 +55,15 @@ def test_item_details_returns_read_only_metadata(client, monkeypatch):
             "title": "Example Movie",
             "type": "movie",
             "year": 2026,
-            "media_info": [{"parts": [{"file_size": "1234"}]}],
+            "media_info": [{
+                "container": "mkv",
+                "video_codec": "hevc",
+                "video_resolution": "4k",
+                "audio_codec": "aac",
+                "audio_channels": "6",
+                "bitrate": 12000,
+                "parts": [{"file_size": "1234"}],
+            }],
             "guid": "plex://movie/123",
         }
     })
@@ -73,12 +81,12 @@ def test_item_details_returns_read_only_metadata(client, monkeypatch):
         "last_played": None,
         "play_count": 0,
         "file_size": 1234,
-        "container": None,
-        "video_codec": None,
-        "video_resolution": None,
-        "audio_codec": None,
-        "audio_channels": None,
-        "bitrate": None,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_resolution": "4k",
+        "audio_codec": "aac",
+        "audio_channels": "6",
+        "bitrate": 12000,
         "guid": "plex://movie/123",
     }
 

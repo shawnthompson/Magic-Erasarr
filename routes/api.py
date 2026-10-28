@@ -165,6 +165,14 @@ def api_item_details(rating_key):
         metadata = _unwrap_metadata(tautulli.get_metadata(rating_key))
         if not metadata:
             return jsonify({"error": "Item not found"}), 404
+        media_info = next(
+            (item for item in (metadata.get("media_info") or []) if isinstance(item, dict)),
+            {},
+        )
+
+        def media_value(field):
+            return metadata.get(field) if metadata.get(field) not in (None, "") else media_info.get(field)
+
         media_type = metadata.get("media_type") or metadata.get("type") or "unknown"
         return jsonify({
             "rating_key": str(metadata.get("rating_key") or rating_key),
@@ -176,12 +184,12 @@ def api_item_details(rating_key):
             "last_played": metadata.get("last_played"),
             "play_count": metadata.get("play_count") or 0,
             "file_size": _metadata_file_size(metadata),
-            "container": metadata.get("container"),
-            "video_codec": metadata.get("video_codec"),
-            "video_resolution": metadata.get("video_resolution"),
-            "audio_codec": metadata.get("audio_codec"),
-            "audio_channels": metadata.get("audio_channels"),
-            "bitrate": metadata.get("bitrate"),
+            "container": media_value("container"),
+            "video_codec": media_value("video_codec"),
+            "video_resolution": media_value("video_resolution"),
+            "audio_codec": media_value("audio_codec"),
+            "audio_channels": media_value("audio_channels"),
+            "bitrate": media_value("bitrate"),
             "guid": metadata.get("guid") or metadata.get("grandparent_guid"),
         })
     except Exception as e:
