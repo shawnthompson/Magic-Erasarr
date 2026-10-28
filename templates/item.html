@@ -162,7 +162,8 @@
           page.innerHTML += section('Playback across entire series', viewerHtml(viewers[ratingKey]));
           if (item.media_type === 'show') {
             try {
-              const episodes = await json('/api/tautulli-tv-request-details?rating_key=' + encodeURIComponent(ratingKey));
+              const thresholdQuery = watchedThreshold ? '&watched_threshold=' + encodeURIComponent(watchedThreshold) : '';
+              const episodes = await json('/api/tautulli-tv-request-details?rating_key=' + encodeURIComponent(ratingKey) + thresholdQuery);
               page.innerHTML += section('Requested-content progress', requestDetailsHtml(episodes));
               page.innerHTML += section('Seasons and episodes', episodesHtml(episodes));
             } catch (error) {

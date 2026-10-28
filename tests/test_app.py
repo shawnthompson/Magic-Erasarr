@@ -555,7 +555,7 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
     })
     monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 7, "friendly_name": "Alice"}])
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda key, media_type: [{
-        "rating_key": "episode-1", "user_id": 7, "percent_complete": 100, "date": 1700000000,
+        "rating_key": "episode-1", "user_id": 7, "percent_complete": 87, "date": 1700000000,
     }])
 
     def fake_children(key, media_type):
@@ -564,16 +564,39 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
         return {"children_list": [{"rating_key": "episode-1", "media_index": 1, "title": "Pilot"}]}
 
     monkeypatch.setattr(api.tautulli, "get_children_metadata", fake_children)
-    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [])
+    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [{"friendly_name": "Alice", "total_plays": 3}])
 
-    response = client.get("/api/tautulli-tv-request-details?rating_key=show-1")
+    response = client.get("/api/tautulli-tv-request-details?rating_key=show-1&watched_threshold=90")
 
     assert response.status_code == 200
     requester = response.get_json()["requesters"][0]
     assert requester["requested_seasons"] == [1, 2]
     assert requester["missing_seasons"] == [2]
-    assert requester["progress"] == {"completed": 1, "partial": 0, "not_watched": 0, "unknown": 0}
+    assert requester["progress"] == {"completed": 0, "partial": 1, "not_watched": 0, "unknown": 0}
     assert requester["identity_match"] == "stable_id"
+    assert response.get_json()["watched_threshold"] == 90
+    assert response.get_json()["seasons"][0]["episodes"][0]["play_count"] == 3
+
+
+def test_tv_request_details_keeps_tautulli_episodes_without_tmdb_id(client, monkeypatch):
+    """Missing requester metadata must not hide independently available episodes."""
+    from routes import api
+
+    monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guid": "show-without-tmdb"})
+    monkeypatch.setattr(api, "extract_ids", lambda metadata: {})
+    monkeypatch.setattr(api.tautulli, "get_children_metadata", lambda key, media_type: (
+        {"children_list": [{"rating_key": "season-1", "index": 1, "title": "Season 1"}]}
+        if media_type == "show" else {"children_list": [{"rating_key": "episode-1", "media_index": 1, "title": "Pilot"}]}
+    ))
+    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [])
+    monkeypatch.setattr(api.tautulli, "get_item_history", lambda key, media_type: [])
+    monkeypatch.setattr(api.tautulli, "get_settings", lambda: {})
+
+    response = client.get("/api/tautulli-tv-request-details?rating_key=show-1")
+
+    assert response.status_code == 200
+    assert response.get_json()["error"] == "TMDB ID unavailable"
+    assert response.get_json()["seasons"][0]["episodes"][0]["title"] == "Pilot"
 
 
 def test_show_episode_summary_counts_episodes_and_file_sizes(monkeypatch):
