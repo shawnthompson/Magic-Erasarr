@@ -1103,6 +1103,11 @@ def _series_status_label(status):
     return "Unknown"
 
 
+def _tv_episode_key(season_number, episode_number):
+    """Build a stable comparison key across numeric and string API values."""
+    return (str(season_number), str(episode_number))
+
+
 @api_bp.route("/tautulli-tv-request-details")
 def api_tautulli_tv_request_details():
     """Return requested-season coverage and requester progress for one TV show."""
@@ -1204,7 +1209,7 @@ def api_tautulli_tv_request_details():
                     season_catalog[season_number] = season_data
 
         tautulli_by_episode = {
-            (episode.get("season_number"), episode.get("episode_number")): episode
+            _tv_episode_key(episode.get("season_number"), episode.get("episode_number")): episode
             for episode in all_episodes
         }
         catalog_by_season = {}
@@ -1212,7 +1217,7 @@ def api_tautulli_tv_request_details():
             if not isinstance(season_data, dict):
                 continue
             episodes = season_data.get("episodes") or season_data.get("results") or []
-            catalog_by_season[season_number] = [
+            catalog_by_season[str(season_number)] = [
                 {
                     "season_number": season_number,
                     "episode_number": item.get("episodeNumber") or item.get("episode_number"),
@@ -1224,19 +1229,20 @@ def api_tautulli_tv_request_details():
             ]
 
         season_by_number = {
-            season.get("season_number"): season
+            str(season.get("season_number")): season
             for season in seasons
             if season.get("season_number") is not None
         }
-        for season_number, catalog_episodes in catalog_by_season.items():
-            season = season_by_number.get(season_number)
+        for season_key, catalog_episodes in catalog_by_season.items():
+            season_number = catalog_episodes[0].get("season_number") if catalog_episodes else season_key
+            season = season_by_number.get(season_key)
             if season is None:
                 season = {"season_number": season_number, "title": f"Season {season_number}", "episodes": []}
                 seasons.append(season)
-                season_by_number[season_number] = season
-            known_numbers = {episode.get("episode_number") for episode in season["episodes"]}
+                season_by_number[season_key] = season
+            known_numbers = {str(episode.get("episode_number")) for episode in season["episodes"]}
             for expected in catalog_episodes:
-                if expected.get("episode_number") in known_numbers:
+                if str(expected.get("episode_number")) in known_numbers:
                     continue
                 season["episodes"].append({
                     "rating_key": None,
@@ -1281,7 +1287,7 @@ def api_tautulli_tv_request_details():
             requested_catalog = []
             missing_seasons = []
             for season_number in sorted(requested_seasons):
-                season_episodes = catalog_by_season.get(season_number)
+                season_episodes = catalog_by_season.get(str(season_number))
                 if season_episodes is None:
                     fallback = [episode for episode in all_episodes if episode.get("season_number") == season_number]
                     if fallback:
@@ -1292,7 +1298,7 @@ def api_tautulli_tv_request_details():
                 requested_catalog.extend(season_episodes)
             statuses = []
             for expected in requested_catalog:
-                episode = tautulli_by_episode.get((expected.get("season_number"), expected.get("episode_number")))
+                episode = tautulli_by_episode.get(_tv_episode_key(expected.get("season_number"), expected.get("episode_number")))
                 if episode:
                     status = _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
                     availability = "available"

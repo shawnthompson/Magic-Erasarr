@@ -591,6 +591,7 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
     assert requester["unaired_count"] == 1, requester
     assert requester["unavailable_count"] == 1
     assert response.get_json()["seasons"][0]["episodes"][0]["viewers"][0]["last_played"] == 1700000000
+    assert [season["season_number"] for season in response.get_json()["seasons"]] == [1, 2]
 
 
 def test_tv_request_details_keeps_tautulli_episodes_without_tmdb_id(client, monkeypatch):
