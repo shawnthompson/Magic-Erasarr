@@ -184,7 +184,7 @@
                 seriesStatus.className = `series-status ${status.toLowerCase()}`;
               }
               const nextAirDate = document.querySelector('#nextAirDate');
-              if (nextAirDate) nextAirDate.textContent = `Next air date: ${airDate(episodes.next_air_date)}`;
+              if (nextAirDate) nextAirDate.textContent = `${episodes.air_date_label || 'Next air date'}: ${airDate(episodes.air_date_value)}`;
               page.innerHTML += section('Series status', `<dl class="grid">${field('Status', value(episodes.series_status, 'Unknown'))}</dl>`);
               page.innerHTML += section('Requested-content progress', requestDetailsHtml(episodes));
               page.innerHTML += section('Seasons and episodes', episodesHtml(episodes));

@@ -588,7 +588,8 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
     assert requester["identity_match"] == "stable_id"
     assert response.get_json()["watched_threshold"] == 90
     assert response.get_json()["series_status"] == "Continuing"
-    assert response.get_json()["next_air_date"] == "2027-01-01"
+    assert response.get_json()["air_date_label"] == "Next air date"
+    assert response.get_json()["air_date_value"] == "2027-01-01"
     assert response.get_json()["seasons"][0]["episodes"][0]["play_count"] == 3
     assert requester["episodes"][0]["availability"] == "available"
     assert requester["unaired_count"] == 1, requester

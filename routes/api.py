@@ -1277,6 +1277,7 @@ def api_tautulli_tv_request_details():
             season["episodes"].sort(key=lambda episode: _season_sort_key(episode.get("episode_number")))
         seasons.sort(key=lambda season: _season_sort_key(season.get("season_number")))
         future_air_dates = []
+        past_air_dates = []
         for season in seasons:
             for episode in season.get("episodes", []):
                 air_date = episode.get("air_date")
@@ -1288,6 +1289,8 @@ def api_tautulli_tv_request_details():
                     continue
                 if parsed_air_date > date.today():
                     future_air_dates.append(parsed_air_date.isoformat())
+                else:
+                    past_air_dates.append(parsed_air_date.isoformat())
 
         tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
         if not tautulli_users:
@@ -1369,9 +1372,18 @@ def api_tautulli_tv_request_details():
         series_status = _series_status_label(
             (media or {}).get("status") if isinstance(media, dict) else metadata.get("status")
         )
+        if future_air_dates:
+            air_date_label = "Next air date"
+            air_date_value = min(future_air_dates)
+        elif series_status == "Ended" and past_air_dates:
+            air_date_label = "Last air date"
+            air_date_value = max(past_air_dates)
+        else:
+            air_date_label = "Next air date"
+            air_date_value = None
         return jsonify({"rating_key": str(rating_key), "seasons": seasons, "requesters": result_requesters,
                         "series_status": series_status, "watched_threshold": threshold,
-                        "next_air_date": min(future_air_dates) if future_air_dates else None,
+                        "air_date_label": air_date_label, "air_date_value": air_date_value,
                         "whole_series": {"episode_count": len(all_episodes)}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
