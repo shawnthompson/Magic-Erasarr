@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.10.0] - 2026-10-28
+
+### Added
+
+- **TV request progress** — Item details now show each Seerr requester, requested seasons, available and unavailable requested content, per-episode watched states, and requested-content progress.
+- **Conservative TV matching** — Stable requester identities are preferred, while unresolved identities and unavailable history remain explicitly unknown.
+
 ## [1.9.0] - 2026-10-26
 
 ### Fixed
