@@ -553,6 +553,14 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
             "seasons": [{"seasonNumber": 1}, {"seasonNumber": 2}],
         }]}
     })
+    monkeypatch.setattr(api.overseerr, "overseerr_find_tv_season", lambda tmdb, season: {
+        "episodes": [{"episodeNumber": 1, "name": "Pilot", "airDate": "2026-01-01"}]
+    } if season == 1 else {
+        "episodes": [
+            {"episodeNumber": 1, "name": "Future", "airDate": "2027-01-01"},
+            {"episodeNumber": 2, "name": "Missing", "airDate": "2026-01-01"},
+        ]
+    })
     monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 7, "friendly_name": "Alice"}])
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda key, media_type: [{
         "rating_key": "episode-1", "user_id": 7, "percent_complete": 87, "date": 1700000000,
@@ -564,18 +572,22 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
         return {"children_list": [{"rating_key": "episode-1", "media_index": 1, "title": "Pilot"}]}
 
     monkeypatch.setattr(api.tautulli, "get_children_metadata", fake_children)
-    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [{"friendly_name": "Alice", "total_plays": 3}])
+    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [{"friendly_name": "Alice", "total_plays": 3, "last_played": 1700000000}])
 
     response = client.get("/api/tautulli-tv-request-details?rating_key=show-1&watched_threshold=90")
 
     assert response.status_code == 200
     requester = response.get_json()["requesters"][0]
     assert requester["requested_seasons"] == [1, 2]
-    assert requester["missing_seasons"] == [2]
+    assert requester["missing_seasons"] == []
     assert requester["progress"] == {"completed": 0, "partial": 1, "not_watched": 0, "unknown": 0}
     assert requester["identity_match"] == "stable_id"
     assert response.get_json()["watched_threshold"] == 90
     assert response.get_json()["seasons"][0]["episodes"][0]["play_count"] == 3
+    assert requester["episodes"][0]["availability"] == "available"
+    assert requester["unaired_count"] == 1
+    assert requester["unavailable_count"] == 1
+    assert response.get_json()["seasons"][0]["episodes"][0]["viewers"][0]["last_played"] == 1700000000
 
 
 def test_tv_request_details_keeps_tautulli_episodes_without_tmdb_id(client, monkeypatch):

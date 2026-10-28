@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.11.0] - 2026-10-28
+
+### Added
+
+- **TV availability detail** — Requested episodes now distinguish available, unavailable, unaired, and unresolved content using Seerr season catalogs and Tautulli library records.
+- **TV playback detail** — Episode and viewer last-watched dates are shown, with requester-specific whole-series progress separated from requested-content progress.
+
 ## [1.10.0] - 2026-10-28
 
 ### Added

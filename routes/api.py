@@ -1,5 +1,6 @@
 """API routes."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
 import logging
 from threading import Lock
 import time
@@ -1082,6 +1083,16 @@ def _tv_request_status(history, episode, user_id, fallback_names, threshold):
     }
 
 
+def _episode_air_status(air_date):
+    """Classify an episode with no Tautulli record without guessing."""
+    if not air_date:
+        return "unresolved"
+    try:
+        return "unaired" if date.fromisoformat(str(air_date)[:10]) > date.today() else "unavailable"
+    except (TypeError, ValueError):
+        return "unresolved"
+
+
 @api_bp.route("/tautulli-tv-request-details")
 def api_tautulli_tv_request_details():
     """Return requested-season coverage and requester progress for one TV show."""
@@ -1109,6 +1120,8 @@ def api_tautulli_tv_request_details():
                     "episode_number": episode.get("media_index") or episode.get("episode_num") or episode.get("index"),
                     "title": episode.get("title") or episode.get("full_title") or "Untitled episode",
                     "air_date": episode.get("originally_available_at") or episode.get("air_date") or episode.get("airdate"),
+                    "availability": "available",
+                    "last_played": episode.get("last_played"),
                     "viewers": [],
                     "play_count": 0,
                 }
@@ -1156,6 +1169,44 @@ def api_tautulli_tv_request_details():
         requests_for_show = media_info.get("requests") if isinstance(media_info, dict) else []
         requests_for_show = [item for item in requests_for_show if isinstance(item, dict)]
 
+        requested_season_numbers = sorted({
+            season.get("seasonNumber")
+            for request_item in requests_for_show
+            for season in (request_item.get("seasons") or [])
+            if isinstance(season, dict) and season.get("seasonNumber") is not None
+        })
+        season_catalog = {}
+        if requested_season_numbers:
+            def load_season(season_number):
+                try:
+                    return season_number, overseerr.overseerr_find_tv_season(tmdb_id, season_number)
+                except Exception:
+                    return season_number, None
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                for season_number, season_data in pool.map(load_season, requested_season_numbers):
+                    season_catalog[season_number] = season_data
+
+        tautulli_by_episode = {
+            (episode.get("season_number"), episode.get("episode_number")): episode
+            for episode in all_episodes
+        }
+        catalog_by_season = {}
+        for season_number, season_data in season_catalog.items():
+            if not isinstance(season_data, dict):
+                continue
+            episodes = season_data.get("episodes") or season_data.get("results") or []
+            catalog_by_season[season_number] = [
+                {
+                    "season_number": season_number,
+                    "episode_number": item.get("episodeNumber") or item.get("episode_number"),
+                    "title": item.get("name") or item.get("title") or "Untitled episode",
+                    "air_date": item.get("airDate") or item.get("air_date"),
+                }
+                for item in episodes
+                if isinstance(item, dict) and (item.get("episodeNumber") or item.get("episode_number")) is not None
+            ]
+
         tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
         if not tautulli_users:
             try:
@@ -1183,18 +1234,55 @@ def api_tautulli_tv_request_details():
                 item.get("seasonNumber") for item in (request_item.get("seasons") or [])
                 if isinstance(item, dict) and item.get("seasonNumber") is not None
             }
-            requested = [episode for episode in all_episodes if episode.get("season_number") in requested_seasons]
-            missing_seasons = sorted(requested_seasons - {episode.get("season_number") for episode in all_episodes})
+            requested_catalog = []
+            missing_seasons = []
+            for season_number in sorted(requested_seasons):
+                season_episodes = catalog_by_season.get(season_number)
+                if season_episodes is None:
+                    fallback = [episode for episode in all_episodes if episode.get("season_number") == season_number]
+                    if fallback:
+                        season_episodes = fallback
+                    else:
+                        missing_seasons.append(season_number)
+                        continue
+                requested_catalog.extend(season_episodes)
             statuses = []
-            for episode in requested:
-                status = _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
-                statuses.append({"rating_key": episode["rating_key"], "season_number": episode["season_number"], "episode_number": episode["episode_number"], **status})
-            counts = {key: sum(1 for item in statuses if item["status"] == key) for key in ("completed", "partial", "not_watched", "unknown")}
+            for expected in requested_catalog:
+                episode = tautulli_by_episode.get((expected.get("season_number"), expected.get("episode_number")))
+                if episode:
+                    status = _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
+                    availability = "available"
+                    rating_key_value = episode["rating_key"]
+                else:
+                    availability = _episode_air_status(expected.get("air_date"))
+                    status = {"status": "unknown", "last_watched": None}
+                    rating_key_value = None
+                statuses.append({
+                    "rating_key": rating_key_value,
+                    "season_number": expected.get("season_number"),
+                    "episode_number": expected.get("episode_number"),
+                    "title": expected.get("title") or (episode or {}).get("title") or "Untitled episode",
+                    "air_date": expected.get("air_date") or (episode or {}).get("air_date"),
+                    "availability": availability,
+                    **status,
+                })
+            counts = {key: sum(1 for item in statuses if item["status"] == key and item["availability"] == "available") for key in ("completed", "partial", "not_watched", "unknown")}
+            whole_series_statuses = [
+                _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
+                for episode in all_episodes
+            ]
+            whole_series_counts = {
+                key: sum(1 for item in whole_series_statuses if item["status"] == key)
+                for key in ("completed", "partial", "not_watched", "unknown")
+            }
             result_requesters.append({
                 "name": name, "identity_match": identity,
                 "requested_seasons": sorted(requested_seasons), "missing_seasons": missing_seasons,
-                "episodes": statuses, "available_count": len(requested), "unavailable_count": len(missing_seasons),
-                "progress": counts,
+                "episodes": statuses, "available_count": sum(1 for item in statuses if item["availability"] == "available"),
+                "unavailable_count": sum(1 for item in statuses if item["availability"] == "unavailable"),
+                "unaired_count": sum(1 for item in statuses if item["availability"] == "unaired"),
+                "unresolved_count": sum(1 for item in statuses if item["availability"] == "unresolved"),
+                "progress": counts, "whole_series_progress": whole_series_counts,
             })
         return jsonify({"rating_key": str(rating_key), "seasons": seasons, "requesters": result_requesters,
                         "watched_threshold": threshold, "whole_series": {"episode_count": len(all_episodes)}})
