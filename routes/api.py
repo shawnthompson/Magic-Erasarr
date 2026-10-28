@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 import logging
+import re
 from threading import Lock
 import time
 
@@ -1041,7 +1042,7 @@ def api_tautulli_episodes():
             with ThreadPoolExecutor(max_workers=8) as pool:
                 episodes = list(pool.map(episode_viewers, episodes))
             seasons.append({
-                "season_number": season.get("parent_index") or season.get("index"),
+                "season_number": _season_number(season),
                 "title": season.get("title") or season.get("full_title") or "Season",
                 "episodes": episodes,
             })
@@ -1108,6 +1109,17 @@ def _tv_episode_key(season_number, episode_number):
     return (str(season_number), str(episode_number))
 
 
+def _season_number(season):
+    """Return a season number even when Tautulli only supplies a title."""
+    for field in ("parent_index", "index", "season_number", "seasonNumber"):
+        value = season.get(field) if isinstance(season, dict) else None
+        if value is not None and value != "":
+            return value
+    title = season.get("title") or season.get("full_title") if isinstance(season, dict) else ""
+    match = re.search(r"(?:season|s)\s*([0-9]+)", str(title), re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
 @api_bp.route("/tautulli-tv-request-details")
 def api_tautulli_tv_request_details():
     """Return requested-season coverage and requester progress for one TV show."""
@@ -1123,7 +1135,7 @@ def api_tautulli_tv_request_details():
         for season in show_data.get("children_list", []) if isinstance(show_data, dict) else []:
             if not isinstance(season, dict) or not season.get("rating_key"):
                 continue
-            season_number = season.get("parent_index") or season.get("index")
+            season_number = _season_number(season)
             season_data = tautulli.get_children_metadata(season["rating_key"], "season")
             episodes = []
             for episode in season_data.get("children_list", []) if isinstance(season_data, dict) else []:

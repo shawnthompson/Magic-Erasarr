@@ -505,7 +505,7 @@ def test_tautulli_episodes_returns_episode_viewers(client, monkeypatch):
 
     def fake_children(rating_key, media_type):
         if media_type == "show":
-            return {"children_list": [{"rating_key": "season-1", "index": 1, "title": "Season 1"}]}
+            return {"children_list": [{"rating_key": "season-1", "title": "Season 1"}]}
         assert rating_key == "season-1"
         return {"children_list": [{
             "rating_key": "episode-1",
