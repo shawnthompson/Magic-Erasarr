@@ -52,6 +52,8 @@
   <script>
     (() => {
       const ratingKey = {{ rating_key|tojson }};
+      const returnUrl = {{ return_url|tojson }};
+      const watchedThreshold = new URLSearchParams(window.location.search).get('threshold') || null;
       const page = document.querySelector('#page');
       const posterUrl = '/api/item-poster?rating_key=' + encodeURIComponent(ratingKey);
 
@@ -78,6 +80,9 @@
       function statusLabel(status) {
         return ({ completed:'Watched', partial:'Partially watched', not_watched:'Not watched', unknown:'Unknown' })[status] || 'Unknown';
       }
+      function thresholdSourceLabel(source) {
+        return source === 'dashboard_override' ? 'dashboard override' : source === 'tautulli' ? 'Tautulli setting' : '85% fallback';
+      }
       async function json(url, options) {
         const response = await fetch(url, options);
         const data = await response.json().catch(() => ({}));
@@ -92,7 +97,10 @@
       }
       function requesterHtml(info) {
         if (!info || !Array.isArray(info.requesters) || !info.requesters.length) return '<p class="dim">No requester information returned.</p>';
-        return info.requesters.map(requester => `<div class="requester"><strong>${value(requester.name)}</strong><span>${statusLabel(requester.status)}</span>${requester.last_watched ? ` · last watched ${esc(date(requester.last_watched))}` : ''}<br><span class="dim">Identity: ${esc(requester.identity_match || 'unknown')}</span></div>`).join('');
+        const threshold = info.watched_threshold != null
+          ? `<div class="dim">Threshold: ${esc(info.watched_threshold)}% (${thresholdSourceLabel(info.watched_threshold_source)})</div>`
+          : '';
+        return `${threshold}${info.requesters.map(requester => `<div class="requester"><strong>${value(requester.name)}</strong><span>${statusLabel(requester.status)}</span>${requester.last_watched ? ` · last watched ${esc(date(requester.last_watched))}` : ''}<br><span class="dim">Identity: ${esc(requester.identity_match || 'unknown')}</span></div>`).join('')}`;
       }
       function viewerHtml(info) {
         if (!info || info.error) return '<p class="dim">Viewer statistics unavailable.</p>';
@@ -113,15 +121,26 @@
           const item = await json('/api/item-details/' + encodeURIComponent(ratingKey));
           const mediaType = item.media_type === 'show' ? 'TV show' : item.media_type === 'movie' ? 'Movie' : (item.media_type || 'Item');
           page.innerHTML = `<div class="hero"><img class="poster" src="${posterUrl}" alt="${esc(item.title)} poster" onerror="this.remove()"><div><h1>${value(item.title, 'Untitled item')}</h1><div class="subtitle">${value(item.year)} · ${esc(mediaType)}</div><div class="status">Read-only details</div></div></div>`;
-          page.innerHTML += section('Library', `<dl class="grid">${field('Library', value(item.library_name))}${field('Availability', item.file_size ? 'On disk' : 'Missing or unavailable')}${field('File size', bytes(item.file_size))}${field('Added', date(item.added_at))}${field('Last played', date(item.last_played))}${field('Play count', value(item.play_count || 0))}</dl>`);
-          page.innerHTML += section('Media', `<dl class="grid">${field('Container', value(item.container))}${field('Video', value(item.video_codec))}${field('Resolution', value(item.video_resolution))}${field('Audio', value(item.audio_codec))}${field('Audio channels', value(item.audio_channels))}${field('Bitrate', item.bitrate ? `${esc(item.bitrate)} kbps` : '<span class="dim">Unknown</span>')}</dl>`);
           const mediaTypeForApi = item.media_type === 'show' ? 'show' : 'movie';
-          const [requestersResult, viewersResult] = await Promise.allSettled([
-            json('/api/overseerr-info', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey], media_type:mediaTypeForApi }) }),
-            json('/api/tautulli-viewers', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey] }) })
+          const [requestersResult, viewersResult, summaryResult] = await Promise.allSettled([
+            json('/api/overseerr-info', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey], media_type:mediaTypeForApi, watched_threshold:watchedThreshold }) }),
+            json('/api/tautulli-viewers', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey] }) }),
+            item.media_type === 'show'
+              ? json('/api/tautulli-show-summaries', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rating_keys:[ratingKey] }) })
+              : Promise.resolve(null)
           ]);
           const requesters = requestersResult.status === 'fulfilled' ? requestersResult.value : {};
           const viewers = viewersResult.status === 'fulfilled' ? viewersResult.value : { [ratingKey]: { error:true } };
+          const summary = summaryResult.status === 'fulfilled' ? summaryResult.value && summaryResult.value[ratingKey] : null;
+          const summaryAvailable = item.media_type !== 'show' || (summary && !summary.error && summary.episode_count != null);
+          const showFileSize = summaryAvailable && summary ? Number(summary.file_size) || 0 : 0;
+          const fileSize = item.media_type === 'show' ? showFileSize : Number(item.file_size) || 0;
+          const availability = item.media_type === 'show'
+            ? (summaryAvailable ? `${Number(summary.episode_count)} episode${Number(summary.episode_count) === 1 ? '' : 's'} reported` : 'Unavailable')
+            : (fileSize ? 'On disk' : 'Missing or unavailable');
+          const episodeField = item.media_type === 'show' ? field('Episode count', summaryAvailable ? value(summary.episode_count) : '<span class="dim">Unavailable</span>') : '';
+          page.innerHTML += section('Library', `<dl class="grid">${field('Library', value(item.library_name))}${field('Availability', availability)}${episodeField}${field('File size', fileSize ? bytes(fileSize) : '<span class="dim">Not reported</span>')}${field('Added', date(item.added_at))}${field('Last played', date(item.last_played))}${field('Play count', value(item.play_count || 0))}</dl>`);
+          page.innerHTML += section('Media', `<dl class="grid">${field('Container', value(item.container))}${field('Video', value(item.video_codec))}${field('Resolution', value(item.video_resolution))}${field('Audio', value(item.audio_codec))}${field('Audio channels', value(item.audio_channels))}${field('Bitrate', item.bitrate ? `${esc(item.bitrate)} kbps` : '<span class="dim">Unknown</span>')}</dl>`);
           page.innerHTML += section('Requesters and watch status', requestersResult.status === 'fulfilled' ? requesterHtml(requesters[ratingKey]) : '<p class="dim">Requester information unavailable.</p>');
           page.innerHTML += section('Playback', viewerHtml(viewers[ratingKey]));
           if (item.media_type === 'show') {
@@ -133,7 +152,7 @@
             }
           }
         } catch (error) {
-          page.innerHTML = `<section class="section"><h1>Item unavailable</h1><p class="error-box">${esc(error.message || 'The item could not be loaded.')}</p><p><a href="{{ return_url }}">Return to library</a></p></section>`;
+          page.innerHTML = `<section class="section"><h1>Item unavailable</h1><p class="error-box">${esc(error.message || 'The item could not be loaded.')}</p><p><a href="${esc(returnUrl)}">Return to library</a></p></section>`;
         }
       }
       page.addEventListener('click', event => {

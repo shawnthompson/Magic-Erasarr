@@ -1059,6 +1059,8 @@
       if (currentLibType) detailParams.set('type', currentLibType);
       const detailLibrary = $('#libraryFilter').value.trim();
       if (detailLibrary) detailParams.set('library', detailLibrary);
+      const detailThreshold = $('#watchedThresholdInput').value.trim();
+      if (detailThreshold) detailParams.set('threshold', detailThreshold);
       detailParams.set('return', window.location.pathname + window.location.search);
       const detailHref = '/item/' + encodeURIComponent(String(rk)) + '?' + detailParams.toString();
 

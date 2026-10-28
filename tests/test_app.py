@@ -33,6 +33,16 @@ def test_item_detail_route_renders_direct_page(client):
     assert b"Back to library" in r.data
 
 
+def test_item_detail_route_serializes_untrusted_return_url(client):
+    """A return path cannot escape the JavaScript string context."""
+    r = client.get("/item/missing?return=/%24%7Balert(document.domain)%7D")
+    assert r.status_code == 200
+    assert b'const returnUrl = "/${alert(document.domain)}";' in r.data
+    assert b'<a href="${esc(returnUrl)}">Return to library</a>' in r.data
+    assert b"watched_threshold:watchedThreshold" in r.data
+    assert b"/api/tautulli-show-summaries" in r.data
+
+
 def test_item_details_returns_read_only_metadata(client, monkeypatch):
     """The direct detail page can load normalized metadata by rating key."""
     from routes import api
