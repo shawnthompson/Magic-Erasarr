@@ -1,54 +1,12 @@
-# Magic-Erasarr — see README for setup. Image tag: latest (master) or dev (dev branch).
+# Magic-Erasarr — see README for setup. Image tag: latest (main) or dev (dev branch).
 services:
   magic-erasarr:
-    image: ghcr.io/cbodden/magic-erasarr
+    image: ghcr.io/shawnthompson/magic-erasarr
     container_name: magic-erasarr
     ports:
-      - "5000:5000"
-    environment:
-      # App (DEBUG=false, STAT=true for production)
-      - DEBUG=false
-      - STAT=true
-
-      # Tautulli
-      - TAUTULLI_URL=http://tautulli:8181
-      - TAUTULLI_API_KEY=your_tautulli_api_key
-
-      # Plex Media Server (optional — refresh library after *arr deletes; then Tautulli refresh)
-      - PLEX_URL=http://plex:32400
-      - PLEX_TOKEN=your_plex_token
-
-      # Seerr (Overseerr-compatible)
-      - OVERSEERR_URL=http://overseerr:5055
-      - OVERSEERR_API_KEY=your_seerr_api_key
-
-      # Radarr (primary)
-      - RADARR_1_URL=http://radarr:7878
-      - RADARR_1_API_KEY=your_radarr_api_key
-      - RADARR_1_NAME=Radarr
-
-      # Radarr (secondary — leave blank to disable)
-      - RADARR_2_URL=
-      - RADARR_2_API_KEY=
-      - RADARR_2_NAME=Radarr 4K
-
-      # Sonarr (primary)
-      - SONARR_1_URL=http://sonarr:8989
-      - SONARR_1_API_KEY=your_sonarr_api_key
-      - SONARR_1_NAME=Sonarr
-
-      # Sonarr (secondary — leave blank to disable)
-      - SONARR_2_URL=
-      - SONARR_2_API_KEY=
-      - SONARR_2_NAME=Sonarr 4K
-
-      # Lidarr (primary)
-      - LIDARR_1_URL=http://lidarr:8686
-      - LIDARR_1_API_KEY=your_lidarr_api_key
-      - LIDARR_1_NAME=Lidarr
-
-      # Lidarr (secondary — leave blank to disable)
-      - LIDARR_2_URL=
-      - LIDARR_2_API_KEY=
-      - LIDARR_2_NAME=Lidarr 4K
+      - "${MAGIC_ERASARR_PORT:-5000}:5000"
+    # Compose does not pass its project .env to the container automatically.
+    # This explicitly loads the repository-root .env at ../.env.
+    env_file:
+      - ../.env
     restart: unless-stopped

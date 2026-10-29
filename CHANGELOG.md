@@ -4,22 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.12.0] - 2026-10-29
 
 ### Added
 
+- **Requester watch status** — The dashboard and item details show Seerr requesters, requester-specific watch status, last-watched dates, and the threshold used for each result.
+- **Stable requester matching** — Seerr Plex IDs are resolved and matched to Tautulli users before using conservative name fallback; unresolved identities and unavailable history remain explicitly unknown.
+- **Item detail pages** — Added read-only `/item/<rating_key>` pages with posters, metadata, matching identifiers, viewer statistics, and TV episode details, while preserving safe same-origin return links.
+- **TV request progress** — Item details show requested seasons, requested-content progress, whole-series progress, episode watched states, and missing requested content.
+- **TV availability and air dates** — Requested episodes distinguish available, unavailable, unaired, and unresolved content, with next-air or last-air dates and series status.
 - **Settings page** — Added `/settings` for browser-local library visibility, Light/Dark/System themes, watched-threshold preferences, integration status, and setup guidance.
 - **Configurable watched threshold** — Dashboard and item-detail requester status now use the saved Settings value, while blank settings retain Tautulli's configured threshold and 85% fallback behavior.
+- **Deployment workflow** — Added a test-gated self-hosted deployment workflow for the production `main` branch.
+- **Docker environment loading** — Docker Compose now passes the repository-root `.env` file into the container instead of relying on hard-coded placeholder values.
+- **Configurable Docker port** — The host port is now controlled by `MAGIC_ERASARR_PORT` in `.env`, while the container continues listening on port 5000.
 
 ### Changed
 
-- **Library visibility** — Combined library views can exclude selected Tautulli libraries by stable section ID.
+- **Library views** — Combined library results can exclude selected Tautulli libraries by stable section ID; TV episode summaries are loaded separately with bounded concurrency and short-lived caching so the initial response stays fast.
+- **TV summaries** — TV rows show episode totals and combined file size; episode play counts and last-played values come from per-user and history data when available.
+- **Removal safety** — Movie removal requires an explicit Radarr library-copy selection and removes only that library entry with files preserved; TV and music removal continue to delete their managed files after confirmation.
+- **CI** — Docker tests run on pull requests and `main`, use Python 3.14, and only publish images for non-PR pushes.
+- **Repository ownership** — Application links, Docker image metadata, Compose image name, and historical release links now point to `shawnthompson/Magic-Erasarr`.
 - **Credentials** — Settings reports integration configuration without exposing API keys or tokens; credentials remain environment-managed.
-- **Documentation** — README now documents the Settings page and its preferences.
+- **Documentation** — README now documents the Settings page, requester and TV detail behavior, and the different file behavior for movie, TV, and music removal. The item-detail architecture is documented separately.
 
 ### Fixed
 
 - **Library visibility safety** — The visibility save control stays disabled until library discovery succeeds, preventing a failed or empty library load from clearing existing preferences.
+- **TV metadata** — Season and episode identifiers, sort values, nested movie media metadata, and ended-show air dates now have reliable fallbacks.
+- **Removal identity** — Movie and requester matching use stable IDs where available and report ambiguity instead of guessing.
 
 ## [1.11.0] - 2026-10-28
 
@@ -153,10 +167,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Missing Plex metadata no longer blocks removal; Tautulli history and cache are still cleaned when Plex metadata is unavailable.
 
-[1.6.0]: https://github.com/cbodden/Magic-Erasarr/releases/tag/v1.6.0
-[1.5.0]: https://github.com/cbodden/Magic-Erasarr/releases/tag/v1.5.0
-[1.4.0]: https://github.com/cbodden/Magic-Erasarr/releases/tag/v1.4.0
-[1.3.0]: https://github.com/cbodden/Magic-Erasarr/releases/tag/v1.3.0
-[1.2.0]: https://github.com/cbodden/Magic-Erasarr/releases/tag/v1.2.0
-[1.1.0]: https://github.com/cbodden/Magic-Erasarr/releases/tag/v1.1.0
-[1.0.0]: https://github.com/cbodden/Magic-Erasarr/releases/tag/v1.0.0
+[1.12.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.12.0
+[1.6.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.6.0
+[1.5.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.5.0
+[1.4.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.4.0
+[1.3.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.3.0
+[1.2.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.2.0
+[1.1.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.1.0
+[1.0.0]: https://github.com/shawnthompson/Magic-Erasarr/releases/tag/v1.0.0

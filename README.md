@@ -1,6 +1,6 @@
 # Magic-Erasarr
 
-**Version 1.11.0** — A web app that shows your Tautulli library sorted by last played and lets you bulk-remove items from **Seerr**, **Radarr**, **Sonarr**, and **Lidarr** in one click. After removal, the app can trigger a **Plex** library refresh and a **Tautulli** media info refresh so changes appear in both.
+**Version 1.12.0** — A web app that shows your Tautulli library sorted by last played and lets you bulk-remove items from **Seerr**, **Radarr**, **Sonarr**, and **Lidarr** in one click. After removal, the app can trigger a **Plex** library refresh and a **Tautulli** media info refresh so changes appear in both.
 
 ## Screenshot
 
@@ -17,8 +17,9 @@
 3. Shows the **Seerr requestor** for each item when available
 4. Select one or more items and hit **Remove Selected**
 5. For each item the app will:
-   - Remove the request and clear media data in **Seerr**
-   - Delete the movie/show/artist (and files on disk) from all configured **Radarr**, **Sonarr**, or **Lidarr** instances
+   - Remove the request and clear media data in **Seerr** when applicable
+   - For movies, remove the selected library copy from **Radarr** while preserving movie files and download/torrent data
+   - For TV shows and music, delete the show or artist and its local files from all configured **Sonarr** or **Lidarr** instances
 6. After all selected items are removed from the *arrs, the app will:
    - Trigger a **Plex** library refresh for affected sections (optional; requires `PLEX_URL` and `PLEX_TOKEN`)
    - Wait 20 seconds, then trigger a **Tautulli** media info refresh so Tautulli’s cache reflects Plex’s changes
@@ -157,11 +158,12 @@ The image runs **gunicorn** inside the container (no Flask dev server). Set `DEB
 ```bash
 cd docker
 
-# Edit docker-compose.yaml with your API keys and URLs
-docker compose up -d
+# Create .env in the repository root if it does not already exist, then edit your URLs and API keys
+cp -n ../.env.example ../.env
+docker compose --env-file ../.env up -d
 ```
 
-Open **http://localhost:5000** in your browser.
+The container listens on port `5000`; the host port is controlled by `MAGIC_ERASARR_PORT` in `.env` (default: `5000`). Open **http://localhost:<MAGIC_ERASARR_PORT>** in your browser, replacing the placeholder with its configured value.
 
 ## Usage
 

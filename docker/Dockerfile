@@ -2,9 +2,9 @@
 # Set DEBUG=true and STAT=true in env (e.g. docker-compose) as needed.
 FROM python:3.14-alpine
 
-ARG VERSION=1.11.0
-LABEL maintainer="cbodden" \
-      org.opencontainers.image.source="https://github.com/cbodden/Magic-Erasarr" \
+ARG VERSION=1.12.0
+LABEL maintainer="shawnthompson" \
+      org.opencontainers.image.source="https://github.com/shawnthompson/Magic-Erasarr" \
       version="${VERSION}"
 
 ENV PYTHONUNBUFFERED=1 \
