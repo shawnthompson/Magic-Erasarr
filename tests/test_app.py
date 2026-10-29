@@ -41,6 +41,8 @@ def test_item_detail_route_serializes_untrusted_return_url(client):
     assert b'<a href="${esc(returnUrl)}">Return to library</a>' in r.data
     assert b"watched_threshold:watchedThreshold" in r.data
     assert b"/api/tautulli-show-summaries" in r.data
+    assert b'id="seriesStatus"' in r.data
+    assert b'id="nextAirDate"' in r.data
 
 
 def test_item_details_returns_read_only_metadata(client, monkeypatch):
@@ -53,7 +55,15 @@ def test_item_details_returns_read_only_metadata(client, monkeypatch):
             "title": "Example Movie",
             "type": "movie",
             "year": 2026,
-            "media_info": [{"parts": [{"file_size": "1234"}]}],
+            "media_info": [{
+                "container": "mkv",
+                "video_codec": "hevc",
+                "video_resolution": "4k",
+                "audio_codec": "aac",
+                "audio_channels": "6",
+                "bitrate": 12000,
+                "parts": [{"file_size": "1234"}],
+            }],
             "guid": "plex://movie/123",
         }
     })
@@ -71,12 +81,12 @@ def test_item_details_returns_read_only_metadata(client, monkeypatch):
         "last_played": None,
         "play_count": 0,
         "file_size": 1234,
-        "container": None,
-        "video_codec": None,
-        "video_resolution": None,
-        "audio_codec": None,
-        "audio_channels": None,
-        "bitrate": None,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_resolution": "4k",
+        "audio_codec": "aac",
+        "audio_channels": "6",
+        "bitrate": 12000,
         "guid": "plex://movie/123",
     }
 
@@ -505,7 +515,7 @@ def test_tautulli_episodes_returns_episode_viewers(client, monkeypatch):
 
     def fake_children(rating_key, media_type):
         if media_type == "show":
-            return {"children_list": [{"rating_key": "season-1", "index": 1, "title": "Season 1"}]}
+            return {"children_list": [{"rating_key": "season-1", "title": "Season 1"}]}
         assert rating_key == "season-1"
         return {"children_list": [{
             "rating_key": "episode-1",
@@ -548,10 +558,20 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
     monkeypatch.setattr(api.tautulli, "get_metadata", lambda key: {"guid": "show-guid"})
     monkeypatch.setattr(api, "extract_ids", lambda metadata: {"tmdb": 123})
     monkeypatch.setattr(api.overseerr, "overseerr_find_media", lambda tmdb, media_type: {
+        "status": "Returning Series",
+        "seasons": [{"seasonNumber": 1}, {"seasonNumber": 2}],
         "mediaInfo": {"requests": [{
             "requestedBy": {"plexId": 7, "displayName": "Alice"},
             "seasons": [{"seasonNumber": 1}, {"seasonNumber": 2}],
         }]}
+    })
+    monkeypatch.setattr(api.overseerr, "overseerr_find_tv_season", lambda tmdb, season: {
+        "episodes": [{"episodeNumber": 1, "name": "Pilot", "airDate": "2026-01-01"}]
+    } if season == 1 else {
+        "episodes": [
+            {"episodeNumber": 1, "name": "Future", "airDate": "2027-01-01"},
+            {"episodeNumber": 2, "name": "Missing", "airDate": "2026-01-01"},
+        ]
     })
     monkeypatch.setattr(api.tautulli, "get_users", lambda: [{"user_id": 7, "friendly_name": "Alice"}])
     monkeypatch.setattr(api.tautulli, "get_item_history", lambda key, media_type: [{
@@ -564,18 +584,28 @@ def test_tv_request_details_reports_requester_progress_and_unavailable_seasons(c
         return {"children_list": [{"rating_key": "episode-1", "media_index": 1, "title": "Pilot"}]}
 
     monkeypatch.setattr(api.tautulli, "get_children_metadata", fake_children)
-    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [{"friendly_name": "Alice", "total_plays": 3}])
+    monkeypatch.setattr(api, "_cached_tautulli_viewers", lambda key: [{"friendly_name": "Alice", "total_plays": 3, "last_played": 1700000000}])
 
     response = client.get("/api/tautulli-tv-request-details?rating_key=show-1&watched_threshold=90")
 
     assert response.status_code == 200
     requester = response.get_json()["requesters"][0]
     assert requester["requested_seasons"] == [1, 2]
-    assert requester["missing_seasons"] == [2]
+    assert requester["missing_seasons"] == []
     assert requester["progress"] == {"completed": 0, "partial": 1, "not_watched": 0, "unknown": 0}
     assert requester["identity_match"] == "stable_id"
     assert response.get_json()["watched_threshold"] == 90
+    assert response.get_json()["series_status"] == "Continuing"
+    assert response.get_json()["air_date_label"] == "Next air date"
+    assert response.get_json()["air_date_value"] == "2027-01-01"
     assert response.get_json()["seasons"][0]["episodes"][0]["play_count"] == 3
+    assert response.get_json()["seasons"][0]["episodes"][0]["air_date"] == "2026-01-01"
+    assert response.get_json()["seasons"][0]["episodes"][0]["last_played"] == 1700000000
+    assert requester["episodes"][0]["availability"] == "available"
+    assert requester["unaired_count"] == 1, requester
+    assert requester["unavailable_count"] == 1
+    assert response.get_json()["seasons"][0]["episodes"][0]["viewers"][0]["last_played"] == 1700000000
+    assert [season["season_number"] for season in response.get_json()["seasons"]] == [1, 2]
 
 
 def test_tv_request_details_keeps_tautulli_episodes_without_tmdb_id(client, monkeypatch):
@@ -597,6 +627,13 @@ def test_tv_request_details_keeps_tautulli_episodes_without_tmdb_id(client, monk
     assert response.status_code == 200
     assert response.get_json()["error"] == "TMDB ID unavailable"
     assert response.get_json()["seasons"][0]["episodes"][0]["title"] == "Pilot"
+
+
+def test_season_sort_key_handles_numeric_and_named_seasons():
+    """Mixed API season values sort without comparing int and string directly."""
+    from routes import api
+
+    assert sorted(["specials", 2, "1"], key=api._season_sort_key) == ["1", 2, "specials"]
 
 
 def test_show_episode_summary_counts_episodes_and_file_sizes(monkeypatch):

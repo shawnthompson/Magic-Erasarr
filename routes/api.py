@@ -1,6 +1,8 @@
 """API routes."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
 import logging
+import re
 from threading import Lock
 import time
 
@@ -163,6 +165,14 @@ def api_item_details(rating_key):
         metadata = _unwrap_metadata(tautulli.get_metadata(rating_key))
         if not metadata:
             return jsonify({"error": "Item not found"}), 404
+        media_info = next(
+            (item for item in (metadata.get("media_info") or []) if isinstance(item, dict)),
+            {},
+        )
+
+        def media_value(field):
+            return metadata.get(field) if metadata.get(field) not in (None, "") else media_info.get(field)
+
         media_type = metadata.get("media_type") or metadata.get("type") or "unknown"
         return jsonify({
             "rating_key": str(metadata.get("rating_key") or rating_key),
@@ -174,12 +184,12 @@ def api_item_details(rating_key):
             "last_played": metadata.get("last_played"),
             "play_count": metadata.get("play_count") or 0,
             "file_size": _metadata_file_size(metadata),
-            "container": metadata.get("container"),
-            "video_codec": metadata.get("video_codec"),
-            "video_resolution": metadata.get("video_resolution"),
-            "audio_codec": metadata.get("audio_codec"),
-            "audio_channels": metadata.get("audio_channels"),
-            "bitrate": metadata.get("bitrate"),
+            "container": media_value("container"),
+            "video_codec": media_value("video_codec"),
+            "video_resolution": media_value("video_resolution"),
+            "audio_codec": media_value("audio_codec"),
+            "audio_channels": media_value("audio_channels"),
+            "bitrate": media_value("bitrate"),
             "guid": metadata.get("guid") or metadata.get("grandparent_guid"),
         })
     except Exception as e:
@@ -1040,7 +1050,7 @@ def api_tautulli_episodes():
             with ThreadPoolExecutor(max_workers=8) as pool:
                 episodes = list(pool.map(episode_viewers, episodes))
             seasons.append({
-                "season_number": season.get("parent_index") or season.get("index"),
+                "season_number": _season_number(season),
                 "title": season.get("title") or season.get("full_title") or "Season",
                 "episodes": episodes,
             })
@@ -1082,6 +1092,50 @@ def _tv_request_status(history, episode, user_id, fallback_names, threshold):
     }
 
 
+def _episode_air_status(air_date):
+    """Classify an episode with no Tautulli record without guessing."""
+    if not air_date:
+        return "unresolved"
+    try:
+        return "unaired" if date.fromisoformat(str(air_date)[:10]) > date.today() else "unavailable"
+    except (TypeError, ValueError):
+        return "unresolved"
+
+
+def _series_status_label(status):
+    """Normalize Seerr/TMDB series status to the labels used by the UI."""
+    normalized = str(status or "").strip().casefold()
+    if normalized in {"ended", "canceled", "cancelled", "finished"}:
+        return "Ended"
+    if normalized in {"continuing", "returning series", "in production", "ongoing"}:
+        return "Continuing"
+    return "Unknown"
+
+
+def _tv_episode_key(season_number, episode_number):
+    """Build a stable comparison key across numeric and string API values."""
+    return (str(season_number), str(episode_number))
+
+
+def _season_sort_key(season_number):
+    """Sort numeric seasons before named seasons without comparing unlike types."""
+    try:
+        return (0, int(season_number))
+    except (TypeError, ValueError):
+        return (1, str(season_number or "").casefold())
+
+
+def _season_number(season):
+    """Return a season number even when Tautulli only supplies a title."""
+    for field in ("parent_index", "index", "season_number", "seasonNumber"):
+        value = season.get(field) if isinstance(season, dict) else None
+        if value is not None and value != "":
+            return value
+    title = season.get("title") or season.get("full_title") if isinstance(season, dict) else ""
+    match = re.search(r"(?:season|s)\s*([0-9]+)", str(title), re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
 @api_bp.route("/tautulli-tv-request-details")
 def api_tautulli_tv_request_details():
     """Return requested-season coverage and requester progress for one TV show."""
@@ -1097,7 +1151,7 @@ def api_tautulli_tv_request_details():
         for season in show_data.get("children_list", []) if isinstance(show_data, dict) else []:
             if not isinstance(season, dict) or not season.get("rating_key"):
                 continue
-            season_number = season.get("parent_index") or season.get("index")
+            season_number = _season_number(season)
             season_data = tautulli.get_children_metadata(season["rating_key"], "season")
             episodes = []
             for episode in season_data.get("children_list", []) if isinstance(season_data, dict) else []:
@@ -1109,9 +1163,12 @@ def api_tautulli_tv_request_details():
                     "episode_number": episode.get("media_index") or episode.get("episode_num") or episode.get("index"),
                     "title": episode.get("title") or episode.get("full_title") or "Untitled episode",
                     "air_date": episode.get("originally_available_at") or episode.get("air_date") or episode.get("airdate"),
+                    "availability": "available",
+                    "last_played": episode.get("last_played"),
                     "viewers": [],
                     "play_count": 0,
                 }
+                viewer_timestamps = []
                 for row in _cached_tautulli_viewers(item["rating_key"]):
                     if isinstance(row, dict) and (row.get("friendly_name") or row.get("username")):
                         try:
@@ -1123,6 +1180,14 @@ def api_tautulli_tv_request_details():
                             "total_plays": row.get("total_plays", 0),
                             "last_played": row.get("last_played") or row.get("last_watched"),
                         })
+                        timestamp = _history_timestamp(row)
+                        if timestamp is not None:
+                            viewer_timestamps.append(timestamp)
+                if viewer_timestamps:
+                    existing_timestamp = _history_timestamp({"last_played": item["last_played"]})
+                    item["last_played"] = max(
+                        viewer_timestamps + ([existing_timestamp] if existing_timestamp is not None else [])
+                    )
                 episodes.append(item)
                 all_episodes.append(item)
             seasons.append({"season_number": season_number, "title": season.get("title") or "Season", "episodes": episodes})
@@ -1131,6 +1196,20 @@ def api_tautulli_tv_request_details():
             history = tautulli.get_item_history(rating_key, "show")
         except Exception:
             history = None
+        if isinstance(history, list):
+            for episode in all_episodes:
+                timestamps = [
+                    _history_timestamp(row)
+                    for row in history
+                    if isinstance(row, dict)
+                    and str(row.get("rating_key")) == str(episode.get("rating_key"))
+                ]
+                timestamps = [timestamp for timestamp in timestamps if timestamp is not None]
+                if timestamps:
+                    existing_timestamp = _history_timestamp({"last_played": episode["last_played"]})
+                    episode["last_played"] = max(
+                        timestamps + ([existing_timestamp] if existing_timestamp is not None else [])
+                    )
 
         threshold = request.args.get("watched_threshold", type=float)
         if threshold is None or not 0 <= threshold <= 100:
@@ -1155,6 +1234,103 @@ def api_tautulli_tv_request_details():
         media_info = media.get("mediaInfo") if isinstance(media, dict) else None
         requests_for_show = media_info.get("requests") if isinstance(media_info, dict) else []
         requests_for_show = [item for item in requests_for_show if isinstance(item, dict)]
+
+        requested_season_numbers = {
+            season.get("seasonNumber")
+            for request_item in requests_for_show
+            for season in (request_item.get("seasons") or [])
+            if isinstance(season, dict) and season.get("seasonNumber") is not None
+        }
+        catalog_season_numbers = set(requested_season_numbers)
+        for season in (media.get("seasons") or []) if isinstance(media, dict) else []:
+            if isinstance(season, dict):
+                season_number = season.get("seasonNumber") or season.get("season_number")
+                if season_number is not None:
+                    catalog_season_numbers.add(season_number)
+        season_catalog = {}
+        if catalog_season_numbers:
+            def load_season(season_number):
+                try:
+                    return season_number, overseerr.overseerr_find_tv_season(tmdb_id, season_number)
+                except Exception:
+                    return season_number, None
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                for season_number, season_data in pool.map(load_season, sorted(catalog_season_numbers, key=_season_sort_key)):
+                    season_catalog[season_number] = season_data
+
+        tautulli_by_episode = {
+            _tv_episode_key(episode.get("season_number"), episode.get("episode_number")): episode
+            for episode in all_episodes
+        }
+        catalog_by_season = {}
+        for season_number, season_data in season_catalog.items():
+            if not isinstance(season_data, dict):
+                continue
+            episodes = season_data.get("episodes") or season_data.get("results") or []
+            catalog_by_season[str(season_number)] = [
+                {
+                    "season_number": season_number,
+                    "episode_number": item.get("episodeNumber") or item.get("episode_number"),
+                    "title": item.get("name") or item.get("title") or "Untitled episode",
+                    "air_date": item.get("airDate") or item.get("air_date"),
+                }
+                for item in episodes
+                if isinstance(item, dict) and (item.get("episodeNumber") or item.get("episode_number")) is not None
+            ]
+
+        season_by_number = {
+            str(season.get("season_number")): season
+            for season in seasons
+            if season.get("season_number") is not None
+        }
+        for season_key, catalog_episodes in catalog_by_season.items():
+            season_number = catalog_episodes[0].get("season_number") if catalog_episodes else season_key
+            season = season_by_number.get(season_key)
+            if season is None:
+                season = {"season_number": season_number, "title": f"Season {season_number}", "episodes": []}
+                seasons.append(season)
+                season_by_number[season_key] = season
+            for expected in catalog_episodes:
+                existing = next(
+                    (
+                        episode
+                        for episode in season["episodes"]
+                        if str(episode.get("episode_number")) == str(expected.get("episode_number"))
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    if not existing.get("air_date") and expected.get("air_date"):
+                        existing["air_date"] = expected["air_date"]
+                    continue
+                season["episodes"].append({
+                    "rating_key": None,
+                    "title": expected.get("title") or "Untitled episode",
+                    "episode_number": expected.get("episode_number"),
+                    "air_date": expected.get("air_date"),
+                    "availability": _episode_air_status(expected.get("air_date")),
+                    "last_played": None,
+                    "viewers": [],
+                    "play_count": 0,
+                })
+            season["episodes"].sort(key=lambda episode: _season_sort_key(episode.get("episode_number")))
+        seasons.sort(key=lambda season: _season_sort_key(season.get("season_number")))
+        future_air_dates = []
+        past_air_dates = []
+        for season in seasons:
+            for episode in season.get("episodes", []):
+                air_date = episode.get("air_date")
+                if not air_date:
+                    continue
+                try:
+                    parsed_air_date = date.fromisoformat(str(air_date)[:10])
+                except (TypeError, ValueError):
+                    continue
+                if parsed_air_date > date.today():
+                    future_air_dates.append(parsed_air_date.isoformat())
+                else:
+                    past_air_dates.append(parsed_air_date.isoformat())
 
         tautulli_users = _tautulli_users_cache[1] if _tautulli_users_cache else []
         if not tautulli_users:
@@ -1183,21 +1359,72 @@ def api_tautulli_tv_request_details():
                 item.get("seasonNumber") for item in (request_item.get("seasons") or [])
                 if isinstance(item, dict) and item.get("seasonNumber") is not None
             }
-            requested = [episode for episode in all_episodes if episode.get("season_number") in requested_seasons]
-            missing_seasons = sorted(requested_seasons - {episode.get("season_number") for episode in all_episodes})
+            requested_catalog = []
+            missing_seasons = []
+            for season_number in sorted(requested_seasons, key=_season_sort_key):
+                season_episodes = catalog_by_season.get(str(season_number))
+                if season_episodes is None:
+                    fallback = [episode for episode in all_episodes if episode.get("season_number") == season_number]
+                    if fallback:
+                        season_episodes = fallback
+                    else:
+                        missing_seasons.append(season_number)
+                        continue
+                requested_catalog.extend(season_episodes)
             statuses = []
-            for episode in requested:
-                status = _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
-                statuses.append({"rating_key": episode["rating_key"], "season_number": episode["season_number"], "episode_number": episode["episode_number"], **status})
-            counts = {key: sum(1 for item in statuses if item["status"] == key) for key in ("completed", "partial", "not_watched", "unknown")}
+            for expected in requested_catalog:
+                episode = tautulli_by_episode.get(_tv_episode_key(expected.get("season_number"), expected.get("episode_number")))
+                if episode:
+                    status = _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
+                    availability = "available"
+                    rating_key_value = episode["rating_key"]
+                else:
+                    availability = _episode_air_status(expected.get("air_date"))
+                    status = {"status": "unknown", "last_watched": None}
+                    rating_key_value = None
+                statuses.append({
+                    "rating_key": rating_key_value,
+                    "season_number": expected.get("season_number"),
+                    "episode_number": expected.get("episode_number"),
+                    "title": expected.get("title") or (episode or {}).get("title") or "Untitled episode",
+                    "air_date": expected.get("air_date") or (episode or {}).get("air_date"),
+                    "availability": availability,
+                    **status,
+                })
+            counts = {key: sum(1 for item in statuses if item["status"] == key and item["availability"] == "available") for key in ("completed", "partial", "not_watched", "unknown")}
+            whole_series_statuses = [
+                _tv_request_status(history, episode, user_id, fallback_names if identity == "name_fallback" else set(), threshold)
+                for episode in all_episodes
+            ]
+            whole_series_counts = {
+                key: sum(1 for item in whole_series_statuses if item["status"] == key)
+                for key in ("completed", "partial", "not_watched", "unknown")
+            }
             result_requesters.append({
                 "name": name, "identity_match": identity,
-                "requested_seasons": sorted(requested_seasons), "missing_seasons": missing_seasons,
-                "episodes": statuses, "available_count": len(requested), "unavailable_count": len(missing_seasons),
-                "progress": counts,
+                "requested_seasons": sorted(requested_seasons, key=_season_sort_key), "missing_seasons": sorted(missing_seasons, key=_season_sort_key),
+                "episodes": statuses, "available_count": sum(1 for item in statuses if item["availability"] == "available"),
+                "unavailable_count": sum(1 for item in statuses if item["availability"] == "unavailable"),
+                "unaired_count": sum(1 for item in statuses if item["availability"] == "unaired"),
+                "unresolved_count": sum(1 for item in statuses if item["availability"] == "unresolved"),
+                "progress": counts, "whole_series_progress": whole_series_counts,
             })
+        series_status = _series_status_label(
+            (media or {}).get("status") if isinstance(media, dict) else metadata.get("status")
+        )
+        if future_air_dates:
+            air_date_label = "Next air date"
+            air_date_value = min(future_air_dates)
+        elif series_status == "Ended" and past_air_dates:
+            air_date_label = "Last air date"
+            air_date_value = max(past_air_dates)
+        else:
+            air_date_label = "Next air date"
+            air_date_value = None
         return jsonify({"rating_key": str(rating_key), "seasons": seasons, "requesters": result_requesters,
-                        "watched_threshold": threshold, "whole_series": {"episode_count": len(all_episodes)}})
+                        "series_status": series_status, "watched_threshold": threshold,
+                        "air_date_label": air_date_label, "air_date_value": air_date_value,
+                        "whole_series": {"episode_count": len(all_episodes)}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
