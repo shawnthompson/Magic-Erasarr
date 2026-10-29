@@ -1553,6 +1553,17 @@ def api_refresh_tautulli():
     return jsonify({"refreshed": refreshed, "errors": errors})
 
 
+@api_bp.route("/remove-options")
+def api_remove_options():
+    """Return non-sensitive choices needed before a removal is confirmed."""
+    return jsonify({
+        "radarr_instances": [
+            {"index": index, "name": instance.get("name") or f"Radarr {index + 1}"}
+            for index, instance in enumerate(RADARR_INSTANCES)
+        ],
+    })
+
+
 @api_bp.route("/remove", methods=["POST"])
 def api_remove():
     """
@@ -1568,7 +1579,9 @@ def api_remove():
         "tmdb_id": "...",   (optional — resolved via guid or Tautulli if missing)
         "tvdb_id": "...",
         "imdb_id": "...",
-        "mbid": "..."
+        "mbid": "...",
+        "confirmed": true,
+        "radarr_instance": 0  # required for movie removal; zero-based index
     }
     """
     body = request.get_json(force=True)
@@ -1582,6 +1595,19 @@ def api_remove():
     tvdb_id = body.get("tvdb_id")
     imdb_id = body.get("imdb_id")
     mbid = body.get("mbid")
+    radarr_instance_index = body.get("radarr_instance")
+
+    # The browser confirmation is part of the destructive-operation contract;
+    # callers must also identify exactly one Radarr copy for a movie.
+    if body.get("confirmed") is not True:
+        return jsonify({"error": "Explicit removal confirmation is required"}), 400
+    if media_type == "movie":
+        try:
+            radarr_instance_index = int(radarr_instance_index)
+        except (TypeError, ValueError):
+            return jsonify({"error": "A Radarr instance must be selected for movie removal"}), 400
+        if not 0 <= radarr_instance_index < len(RADARR_INSTANCES):
+            return jsonify({"error": "Selected Radarr instance is not configured"}), 400
 
     # Resolve IDs from guid first (from library item); then from Tautulli get_metadata
     if guid:
@@ -1660,23 +1686,22 @@ def api_remove():
             if media_type == "movie":
                 # Explicit, conservative fallback for legacy items without IDs.
                 if title and str(title).strip():
-                    for i, inst in enumerate(RADARR_INSTANCES):
-                        key = f"radarr_{i + 1}"
-                        try:
-                            candidates = radarr.radarr_find_movie_candidates_by_title(inst, title, year)
-                            if len(candidates) == 1:
-                                radarr.radarr_delete_movie(inst, candidates[0]["id"], delete_files=True)
-                                results[key] = "removed"
-                                results[f"{key}_match"] = "title_fallback"
-                            elif len(candidates) > 1:
-                                results[key] = "ambiguous (title fallback)"
-                            else:
-                                results[key] = "unresolved (title fallback)"
-                        except Exception as e:
-                            results[key] = f"error: {e}"
+                    inst = RADARR_INSTANCES[radarr_instance_index]
+                    key = f"radarr_{radarr_instance_index + 1}"
+                    try:
+                        candidates = radarr.radarr_find_movie_candidates_by_title(inst, title, year)
+                        if len(candidates) == 1:
+                            radarr.radarr_delete_movie(inst, candidates[0]["id"], delete_files=False)
+                            results[key] = "removed"
+                            results[f"{key}_match"] = "title_fallback"
+                        elif len(candidates) > 1:
+                            results[key] = "ambiguous (title fallback)"
+                        else:
+                            results[key] = "unresolved (title fallback)"
+                    except Exception as e:
+                        results[key] = f"error: {e}"
                 else:
-                    for i in range(len(RADARR_INSTANCES)):
-                        results[f"radarr_{i + 1}"] = skip_msg
+                    results[f"radarr_{radarr_instance_index + 1}"] = skip_msg
             elif media_type == "show":
                 for i in range(len(SONARR_INSTANCES)):
                     results[f"sonarr_{i + 1}"] = skip_msg
@@ -1684,19 +1709,21 @@ def api_remove():
                 for i in range(len(LIDARR_INSTANCES)):
                     results[f"lidarr_{i + 1}"] = skip_msg
         elif media_type == "movie":
-            for i, inst in enumerate(RADARR_INSTANCES):
-                key = f"radarr_{i + 1}"
-                try:
-                    movie = radarr.radarr_find_movie(
-                        inst, tmdb_id=tmdb_id, imdb_id=imdb_id
-                    )
-                    if movie:
-                        radarr.radarr_delete_movie(inst, movie["id"], delete_files=True)
-                        results[key] = "removed"
-                    else:
-                        results[key] = "unresolved (stable ID not found)"
-                except Exception as e:
-                    results[key] = f"error: {e}"
+            inst = RADARR_INSTANCES[radarr_instance_index]
+            key = f"radarr_{radarr_instance_index + 1}"
+            try:
+                movie = radarr.radarr_find_movie(
+                    inst, tmdb_id=tmdb_id, imdb_id=imdb_id
+                )
+                if movie:
+                    # Keep completed/download files for the existing torrent
+                    # cleanup workflow; remove only the Radarr library entry.
+                    radarr.radarr_delete_movie(inst, movie["id"], delete_files=False)
+                    results[key] = "removed"
+                else:
+                    results[key] = "unresolved (stable ID not found)"
+            except Exception as e:
+                results[key] = f"error: {e}"
         elif media_type == "artist":
             for i, inst in enumerate(LIDARR_INSTANCES):
                 key = f"lidarr_{i + 1}"

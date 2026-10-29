@@ -772,7 +772,7 @@
 <div class="modal-overlay" id="confirmModal">
   <div class="modal">
     <h2>Confirm Removal</h2>
-    <p>The following items will be <strong>removed from Seerr</strong> (request + data cleared), <strong>deleted from all configured Radarr/Sonarr instances</strong> (including files on disk), and <strong>purged from Tautulli</strong> (history + cache):</p>
+    <p id="confirmDescription"></p>
     <ul id="confirmList"></ul>
     <div class="modal-actions">
       <button class="btn-ghost" id="cancelBtn">Cancel</button>
@@ -1456,15 +1456,52 @@
   async function removeSelected() {
     const list = $('#confirmList');
     list.innerHTML = '';
+    const descriptions = {
+      movie: 'The selected movie will be removed from Seerr (request and data cleared). One selected Radarr library entry will be removed, but movie files and download or torrent data will be preserved. Plex and Tautulli will be refreshed afterward.',
+      show: 'The selected TV show will be removed from Seerr (request and data cleared) and deleted from all configured Sonarr instances, including local files. Plex and Tautulli will be refreshed afterward.',
+      artist: 'The selected artist will be deleted from all configured Lidarr instances, including local files. Plex and Tautulli will be refreshed afterward.',
+    };
+    $('#confirmDescription').textContent = descriptions[currentLibType] || 'The selected items will be removed from the configured services. Plex and Tautulli will be refreshed afterward.';
+    const options = currentLibType === 'movie'
+      ? await fetch('/api/remove-options').then(parseJsonResponse)
+      : { radarr_instances: [] };
     for (const [rk, info] of selected) {
       const li = document.createElement('li');
       li.textContent = `${info.title}${info.year ? ' (' + info.year + ')' : ''}`;
+      if (currentLibType === 'movie') {
+        info.radarr_instance = undefined;
+        const label = document.createElement('label');
+        label.textContent = ' Radarr library copy: ';
+        label.htmlFor = `radarr-instance-${rk}`;
+        const select = document.createElement('select');
+        select.id = label.htmlFor;
+        select.dataset.rk = rk;
+        select.setAttribute('aria-label', `Radarr library copy for ${info.title}`);
+        const placeholder = new Option('Choose a Radarr instance', '');
+        select.add(placeholder);
+        for (const instance of options.radarr_instances || []) {
+          select.add(new Option(instance.name, instance.index));
+        }
+        select.addEventListener('change', () => { info.radarr_instance = select.value; });
+        label.appendChild(select);
+        li.appendChild(document.createElement('br'));
+        li.appendChild(label);
+      }
       list.appendChild(li);
     }
     $('#confirmModal').classList.add('visible');
   }
 
   async function confirmRemove() {
+    if (currentLibType === 'movie') {
+      const missingInstance = Array.from(selected.values()).some(info => (
+        info.radarr_instance === undefined || info.radarr_instance === null || info.radarr_instance === ''
+      ));
+      if (missingInstance) {
+        toast('Choose a Radarr library copy for every movie before removing.', 'error');
+        return;
+      }
+    }
     const btn = $('#confirmBtn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Removing...';
@@ -1492,7 +1529,9 @@
           rating_key: rk,
           section_id: info.section_id != null ? info.section_id : currentLib,
           media_type: currentLibType,
+          confirmed: true,
         };
+        if (currentLibType === 'movie') payload.radarr_instance = info.radarr_instance;
         if (info.guid) payload.guid = info.guid;
         if (info.title) payload.title = info.title;
         if (info.year != null && info.year !== '') payload.year = info.year;
