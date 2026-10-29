@@ -772,7 +772,7 @@
 <div class="modal-overlay" id="confirmModal">
   <div class="modal">
     <h2>Confirm Removal</h2>
-    <p>The following items will be <strong>removed from Seerr</strong> (request + data cleared). Movie removal deletes one selected Radarr library entry but preserves files for the existing download cleanup workflow. Plex and Tautulli will be refreshed afterward.</p>
+    <p id="confirmDescription"></p>
     <ul id="confirmList"></ul>
     <div class="modal-actions">
       <button class="btn-ghost" id="cancelBtn">Cancel</button>
@@ -1456,6 +1456,12 @@
   async function removeSelected() {
     const list = $('#confirmList');
     list.innerHTML = '';
+    const descriptions = {
+      movie: 'The selected movie will be removed from Seerr (request and data cleared). One selected Radarr library entry will be removed, but movie files and download or torrent data will be preserved. Plex and Tautulli will be refreshed afterward.',
+      show: 'The selected TV show will be removed from Seerr (request and data cleared) and deleted from all configured Sonarr instances, including local files. Plex and Tautulli will be refreshed afterward.',
+      artist: 'The selected artist will be deleted from all configured Lidarr instances, including local files. Plex and Tautulli will be refreshed afterward.',
+    };
+    $('#confirmDescription').textContent = descriptions[currentLibType] || 'The selected items will be removed from the configured services. Plex and Tautulli will be refreshed afterward.';
     const options = currentLibType === 'movie'
       ? await fetch('/api/remove-options').then(parseJsonResponse)
       : { radarr_instances: [] };
@@ -1463,6 +1469,7 @@
       const li = document.createElement('li');
       li.textContent = `${info.title}${info.year ? ' (' + info.year + ')' : ''}`;
       if (currentLibType === 'movie') {
+        info.radarr_instance = undefined;
         const label = document.createElement('label');
         label.textContent = ' Radarr library copy: ';
         label.htmlFor = `radarr-instance-${rk}`;
@@ -1486,6 +1493,15 @@
   }
 
   async function confirmRemove() {
+    if (currentLibType === 'movie') {
+      const missingInstance = Array.from(selected.values()).some(info => (
+        info.radarr_instance === undefined || info.radarr_instance === null || info.radarr_instance === ''
+      ));
+      if (missingInstance) {
+        toast('Choose a Radarr library copy for every movie before removing.', 'error');
+        return;
+      }
+    }
     const btn = $('#confirmBtn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Removing...';

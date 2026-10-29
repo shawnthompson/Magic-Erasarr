@@ -25,6 +25,16 @@ def test_index_includes_read_only_item_details_modal(client):
     assert b"/item/" in r.data
 
 
+def test_index_removal_warning_covers_each_media_type(client):
+    """Removal confirmation text discloses the destructive scope by media type."""
+    r = client.get("/")
+    assert r.status_code == 200
+    assert b"including local files" in r.data
+    assert b"movie files and download or torrent data will be preserved" in r.data
+    assert b"descriptions[currentLibType]" in r.data
+    assert b"info.radarr_instance = undefined" in r.data
+
+
 def test_item_detail_route_renders_direct_page(client):
     """The item detail URL is a page route, not only a modal interaction."""
     r = client.get("/item/item-123?return=/?type=movie")
