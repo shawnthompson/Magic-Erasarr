@@ -1168,6 +1168,7 @@ def api_tautulli_tv_request_details():
                     "viewers": [],
                     "play_count": 0,
                 }
+                viewer_timestamps = []
                 for row in _cached_tautulli_viewers(item["rating_key"]):
                     if isinstance(row, dict) and (row.get("friendly_name") or row.get("username")):
                         try:
@@ -1179,6 +1180,14 @@ def api_tautulli_tv_request_details():
                             "total_plays": row.get("total_plays", 0),
                             "last_played": row.get("last_played") or row.get("last_watched"),
                         })
+                        timestamp = _history_timestamp(row)
+                        if timestamp is not None:
+                            viewer_timestamps.append(timestamp)
+                if viewer_timestamps:
+                    existing_timestamp = _history_timestamp({"last_played": item["last_played"]})
+                    item["last_played"] = max(
+                        viewer_timestamps + ([existing_timestamp] if existing_timestamp is not None else [])
+                    )
                 episodes.append(item)
                 all_episodes.append(item)
             seasons.append({"season_number": season_number, "title": season.get("title") or "Season", "episodes": episodes})
@@ -1187,6 +1196,20 @@ def api_tautulli_tv_request_details():
             history = tautulli.get_item_history(rating_key, "show")
         except Exception:
             history = None
+        if isinstance(history, list):
+            for episode in all_episodes:
+                timestamps = [
+                    _history_timestamp(row)
+                    for row in history
+                    if isinstance(row, dict)
+                    and str(row.get("rating_key")) == str(episode.get("rating_key"))
+                ]
+                timestamps = [timestamp for timestamp in timestamps if timestamp is not None]
+                if timestamps:
+                    existing_timestamp = _history_timestamp({"last_played": episode["last_played"]})
+                    episode["last_played"] = max(
+                        timestamps + ([existing_timestamp] if existing_timestamp is not None else [])
+                    )
 
         threshold = request.args.get("watched_threshold", type=float)
         if threshold is None or not 0 <= threshold <= 100:
@@ -1268,9 +1291,18 @@ def api_tautulli_tv_request_details():
                 season = {"season_number": season_number, "title": f"Season {season_number}", "episodes": []}
                 seasons.append(season)
                 season_by_number[season_key] = season
-            known_numbers = {str(episode.get("episode_number")) for episode in season["episodes"]}
             for expected in catalog_episodes:
-                if str(expected.get("episode_number")) in known_numbers:
+                existing = next(
+                    (
+                        episode
+                        for episode in season["episodes"]
+                        if str(episode.get("episode_number")) == str(expected.get("episode_number"))
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    if not existing.get("air_date") and expected.get("air_date"):
+                        existing["air_date"] = expected["air_date"]
                     continue
                 season["episodes"].append({
                     "rating_key": None,
