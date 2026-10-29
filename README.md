@@ -91,6 +91,30 @@ The `.githooks/commit-msg` hook runs on every commit and removes any `Co-authore
 
 Leave any `_URL` blank to skip that instance.
 
+## Settings page
+
+Open **Settings** from the dashboard header or visit `/settings` to manage browser-local preferences.
+
+### Library visibility
+
+The **Library visibility** section lists the libraries discovered from Tautulli. Clear **Show** for any library that should be hidden from the combined Movies, TV Shows, or Music views, then select **Save library visibility**. Hidden libraries remain available on the Settings page and can be restored with **Show all libraries**.
+
+Library visibility is saved in the current browser, so it may be different in another browser or on another device. The preference uses Tautulli section IDs internally, so renaming a library does not silently select a different library.
+
+### Watched threshold
+
+The **Dashboard behavior** section can set the completion percentage used for requester watch status and TV progress details. Enter a whole number from `0` to `100`, then select **Save watched threshold**.
+
+If the field is blank, Magic-Erasarr uses Tautulli's configured movie watched percentage. If Tautulli does not provide one, the application falls back to `85%`. Select **Use Tautulli default** to clear the browser override.
+
+### Appearance
+
+The **Appearance** section supports **System**, **Light**, and **Dark** themes. System follows the device's color-scheme preference. The selected theme applies to the dashboard, Settings page, and item-detail pages.
+
+### Integration credentials
+
+The Settings page shows whether configured integrations are available, but never displays API keys or tokens. Credentials continue to come from the `.env` file or Docker environment variables. Restart Magic-Erasarr after changing credentials.
+
 ### Getting your Plex Media Server token
 
 The `PLEX_TOKEN` must be your **Plex Media Server API token** (X-Plex-Token), not your Plex.tv account token. To get it:

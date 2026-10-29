@@ -471,6 +471,17 @@ def api_library_combined():
             libs = []
         # Only libraries of this type
         libs_of_type = [l for l in libs if (l.get("section_type") or "").lower() == section_type]
+        excluded_section_ids = {
+            part.strip()
+            for raw_value in request.args.getlist("exclude_section_id")
+            for part in raw_value.split(",")
+            if part.strip()
+        }
+        if excluded_section_ids:
+            libs_of_type = [
+                library for library in libs_of_type
+                if str(library.get("section_id")) not in excluded_section_ids
+            ]
         if not libs_of_type:
             return jsonify({
                 "data": [],

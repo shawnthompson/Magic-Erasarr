@@ -16,6 +16,68 @@ def test_index_includes_version(client):
     assert b"v1." in r.data  # e.g. v1.3.0
 
 
+def test_settings_page_includes_accessible_controls_without_secrets(client):
+    """Settings exposes preferences and safe integration status only."""
+    r = client.get("/settings")
+
+    assert r.status_code == 200
+    assert b"Library visibility" in r.data
+    assert b'name="theme"' in r.data
+    assert b"API keys and tokens remain" in r.data
+    assert b"TAUTULLI_API_KEY" not in r.data
+    assert b"PLEX_TOKEN" not in r.data
+    assert b'id="saveLibraries" disabled' in r.data
+    assert b"saveLibraries.disabled = true" in r.data
+    assert b"saveLibraries.disabled = false" in r.data
+
+
+def test_combined_library_excludes_requested_sections(client, monkeypatch):
+    """Excluded section IDs are removed before fetching, sorting, and totals."""
+    from routes import api
+
+    libraries = [
+        {"section_id": "1", "section_name": "Movies", "section_type": "movie"},
+        {"section_id": "2", "section_name": "Kids Movies", "section_type": "movie"},
+        {"section_id": "3", "section_name": "Shows", "section_type": "show"},
+    ]
+    calls = []
+
+    monkeypatch.setattr(api.tautulli, "get_tautulli_libraries", lambda: libraries)
+
+    def fake_library_media(section_id, **kwargs):
+        calls.append(str(section_id))
+        return {"result": "success", "data": {"data": [{"rating_key": str(section_id), "title": str(section_id)}]}}
+
+    monkeypatch.setattr(api.tautulli, "get_library_media_response", fake_library_media)
+
+    response = client.get("/api/library/combined?type=movie&exclude_section_id=2")
+
+    assert response.status_code == 200
+    assert calls == ["1"]
+    assert response.get_json()["libraries"] == ["Movies"]
+    assert response.get_json()["recordsTotal"] == 1
+    assert [item["rating_key"] for item in response.get_json()["data"]] == ["1"]
+
+
+def test_combined_library_ignores_empty_or_unknown_exclusions(client, monkeypatch):
+    """Empty and unknown exclusion values do not hide valid libraries."""
+    from routes import api
+
+    libraries = [{"section_id": "1", "section_name": "Movies", "section_type": "movie"}]
+    monkeypatch.setattr(api.tautulli, "get_tautulli_libraries", lambda: libraries)
+    monkeypatch.setattr(
+        api.tautulli,
+        "get_library_media_response",
+        lambda section_id, **kwargs: {"result": "success", "data": {"data": [{"rating_key": "1"}]}},
+    )
+
+    response = client.get("/api/library/combined?type=movie&exclude_section_id=&exclude_section_id=unknown")
+
+    assert response.status_code == 200
+    assert response.get_json()["libraries"] == ["Movies"]
+    assert response.get_json()["recordsTotal"] == 1
+
+
 def test_index_includes_read_only_item_details_modal(client):
     """The library view includes the detail modal and title trigger."""
     r = client.get("/")
