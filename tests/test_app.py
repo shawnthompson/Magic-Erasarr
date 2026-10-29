@@ -407,7 +407,7 @@ def test_overseerr_info_resolves_seerr_requester_id_before_matching(client, monk
 
 
 def test_remove_movie_uses_stable_ids_for_each_radarr_instance(client, monkeypatch):
-    """A stable ID match is used independently for regular and 4K Radarr copies."""
+    """A stable ID match removes only the explicitly selected Radarr copy."""
     from routes import api
 
     monkeypatch.setattr(api, "RADARR_INSTANCES", [{"name": "Radarr"}, {"name": "Radarr 4K"}])
@@ -423,19 +423,53 @@ def test_remove_movie_uses_stable_ids_for_each_radarr_instance(client, monkeypat
         return found[key]
 
     monkeypatch.setattr(api.radarr, "radarr_find_movie", find_movie)
-    monkeypatch.setattr(api.radarr, "radarr_delete_movie", lambda instance, movie_id, delete_files=True: deleted.append(movie_id))
+    delete_file_flags = []
+    monkeypatch.setattr(api.radarr, "radarr_delete_movie", lambda instance, movie_id, delete_files=True: (deleted.append(movie_id), delete_file_flags.append(delete_files)))
 
     response = client.post("/api/remove", json={
         "rating_key": "plex-old-key",
         "media_type": "movie",
         "tmdb_id": "12345",
         "title": "A title that must not be used",
+        "confirmed": True,
+        "radarr_instance": 1,
     })
 
     assert response.status_code == 200
-    assert deleted == [101, 202]
-    assert response.get_json()["radarr_1"] == "removed"
+    assert deleted == [202]
+    assert delete_file_flags == [False]
+    assert response.get_json().get("radarr_1") is None
     assert response.get_json()["radarr_2"] == "removed"
+
+
+def test_remove_requires_confirmation_and_selected_movie_copy(client, monkeypatch):
+    """The destructive endpoint refuses unattended or ambiguous movie removal."""
+    from routes import api
+
+    monkeypatch.setattr(api, "RADARR_INSTANCES", [{"name": "Radarr"}])
+    response = client.post("/api/remove", json={"media_type": "movie", "tmdb_id": "123"})
+    assert response.status_code == 400
+    assert "confirmation" in response.get_json()["error"].lower()
+
+    response = client.post("/api/remove", json={"media_type": "movie", "tmdb_id": "123", "confirmed": True})
+    assert response.status_code == 400
+    assert "radarr instance" in response.get_json()["error"].lower()
+
+
+def test_remove_options_exposes_only_radarr_names(client, monkeypatch):
+    """The confirmation UI receives names and indexes, never Radarr credentials."""
+    from routes import api
+
+    monkeypatch.setattr(api, "RADARR_INSTANCES", [
+        {"name": "Radarr", "url": "http://radarr", "api_key": "secret"},
+        {"name": "Radarr 4K", "url": "http://radarr-4k", "api_key": "secret-4k"},
+    ])
+    response = client.get("/api/remove-options")
+    assert response.status_code == 200
+    assert response.get_json() == {"radarr_instances": [
+        {"index": 0, "name": "Radarr"},
+        {"index": 1, "name": "Radarr 4K"},
+    ]}
 
 
 def test_remove_movie_reports_ambiguous_title_without_deleting(client, monkeypatch):
@@ -452,6 +486,8 @@ def test_remove_movie_reports_ambiguous_title_without_deleting(client, monkeypat
         "media_type": "movie",
         "title": "Duplicated title",
         "year": 2020,
+        "confirmed": True,
+        "radarr_instance": 0,
     })
 
     assert response.status_code == 200
@@ -472,6 +508,8 @@ def test_remove_movie_reports_title_fallback_when_unique(client, monkeypatch):
         "rating_key": "plex-key",
         "media_type": "movie",
         "title": "Unique title",
+        "confirmed": True,
+        "radarr_instance": 0,
     })
 
     assert response.status_code == 200
