@@ -58,7 +58,8 @@
   .error { color: var(--warning); }
   .actions { display: flex; align-items: center; gap: .75rem; margin-top: 1rem; }
   button { border: 0; border-radius: var(--radius); padding: .55rem 1rem; background: var(--accent); color: #fff; cursor: pointer; font-size: .875rem; }
-  button:hover { background: var(--accent-hover); }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
   .status { color: var(--success); min-height: 1.25rem; font-size: .875rem; }
   .integration-list { display: grid; gap: .65rem; margin-top: 1rem; }
   .integration { display: grid; grid-template-columns: 1fr 1fr auto; gap: 1rem; align-items: center; padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius); }
@@ -92,7 +93,7 @@
       <p class="empty">Loading libraries…</p>
     </div>
     <div class="actions">
-      <button type="button" id="saveLibraries">Save library visibility</button>
+      <button type="button" id="saveLibraries" disabled>Save library visibility</button>
       <button type="button" id="resetLibraries">Show all libraries</button>
       <span id="libraryStatus" class="status" role="status" aria-live="polite"></span>
     </div>
@@ -149,6 +150,7 @@
   const THRESHOLD_KEY = 'magic-erasarr-watched-threshold';
   const list = document.getElementById('libraryList');
   const status = document.getElementById('libraryStatus');
+  const saveLibraries = document.getElementById('saveLibraries');
   const thresholdInput = document.getElementById('watchedThresholdInput');
   const thresholdStatus = document.getElementById('thresholdStatus');
 
@@ -161,6 +163,7 @@
 
   function renderLibraries(libraries) {
     if (!libraries.length) {
+      saveLibraries.disabled = true;
       list.innerHTML = '<p class="empty">No Tautulli libraries were found.</p>';
       return;
     }
@@ -178,6 +181,7 @@
           <span class="library-visibility"><input id="${inputId}" type="checkbox" data-section-id="${escapeHtml(id)}" ${hidden.has(id) ? '' : 'checked'}> <label for="${inputId}">Show</label></span>
         </div>`;
       }).join('')}`;
+    saveLibraries.disabled = false;
   }
 
   function escapeHtml(value) {
@@ -193,6 +197,7 @@
       if (!response.ok || !Array.isArray(data)) throw new Error(data.error || 'Could not load libraries.');
       renderLibraries(data);
     } catch (error) {
+      saveLibraries.disabled = true;
       list.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
     }
   }
@@ -242,7 +247,8 @@
     }
   });
 
-  document.getElementById('saveLibraries').addEventListener('click', () => {
+  saveLibraries.addEventListener('click', () => {
+    if (saveLibraries.disabled) return;
     const hidden = [...document.querySelectorAll('[data-section-id]')]
       .filter(input => !input.checked)
       .map(input => input.dataset.sectionId)

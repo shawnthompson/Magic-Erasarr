@@ -26,6 +26,9 @@ def test_settings_page_includes_accessible_controls_without_secrets(client):
     assert b"API keys and tokens remain" in r.data
     assert b"TAUTULLI_API_KEY" not in r.data
     assert b"PLEX_TOKEN" not in r.data
+    assert b'id="saveLibraries" disabled' in r.data
+    assert b"saveLibraries.disabled = true" in r.data
+    assert b"saveLibraries.disabled = false" in r.data
 
 
 def test_combined_library_excludes_requested_sections(client, monkeypatch):
