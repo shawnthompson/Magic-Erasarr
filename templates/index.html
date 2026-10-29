@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Magic-Erasarr</title>
+<script>
+  (() => {
+    try {
+      const theme = localStorage.getItem('magic-erasarr-theme');
+      if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    } catch (_) {}
+  })();
+</script>
 <style>
   :root {
     --bg: #0f1117;
@@ -19,6 +27,38 @@
     --success: #22c55e;
     --warning: #f59e0b;
     --radius: 8px;
+  }
+
+  [data-theme="light"] {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface2: #e9edf5;
+    --border: #cbd2df;
+    --text: #1f2937;
+    --text-dim: #596579;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --success: #15803d;
+    --warning: #b45309;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface2: #e9edf5;
+      --border: #cbd2df;
+      --text: #1f2937;
+      --text-dim: #596579;
+      --accent: #4f46e5;
+      --accent-hover: #4338ca;
+      --danger: #dc2626;
+      --danger-hover: #b91c1c;
+      --success: #15803d;
+      --warning: #b45309;
+    }
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -49,6 +89,14 @@
   }
 
   header h1 span { color: var(--accent); }
+
+  header a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.875rem;
+  }
+  header a:hover, header a:focus { color: var(--text); text-decoration: underline; }
+  :focus-visible { outline: 3px solid var(--accent-hover); outline-offset: 3px; }
 
   .container {
     max-width: 1200px;
@@ -683,6 +731,7 @@
 
 <header>
   <h1><span>Magic</span>-Erasarr</h1>
+  <a href="/settings">Settings</a>
 </header>
 
 <div class="top-alert" id="topAlert">
@@ -714,11 +763,6 @@
     <div class="search-wrap" id="requestorSearchWrap" style="display:none;">
       <input type="text" id="requestorSearchInput" placeholder="Requested by..." />
     </div>
-    <label class="threshold-control" for="watchedThresholdInput">
-      Watched threshold
-      <input type="number" id="watchedThresholdInput" min="0" max="100" step="1" placeholder="Default" aria-describedby="watchedThresholdHelp" />%
-    </label>
-    <span id="watchedThresholdHelp" class="sr-only">Leave blank to use Tautulli's movie threshold, or 85 percent when it is unavailable.</span>
     <button class="btn-accent" id="loadBtn" disabled>Load</button>
   </div>
 
@@ -933,8 +977,6 @@
     if (page > 0) params.set('page', String(page));
     if (sortColumn !== 'last_played') params.set('sort', sortColumn);
     if (sortDir !== 'asc') params.set('dir', sortDir);
-    const threshold = $('#watchedThresholdInput').value.trim();
-    if (threshold) params.set('threshold', threshold);
     if (new URLSearchParams(window.location.search).get('test_calculating') === '1') {
       params.set('test_calculating', '1');
     }
@@ -953,7 +995,6 @@
     pendingLibraryFilter = params.get('library') || '';
     $('#searchInput').value = params.get('search') || '';
     $('#requestorSearchInput').value = params.get('requestor') || '';
-    $('#watchedThresholdInput').value = params.get('threshold') || '';
     const restoredPage = Number.parseInt(params.get('page') || '0', 10);
     page = Number.isInteger(restoredPage) && restoredPage >= 0 ? restoredPage : 0;
     const allowedSorts = ['sort_title', 'year', 'added_at', 'last_played', 'play_count', 'file_size', 'requested_by', 'library_name'];
@@ -1059,7 +1100,7 @@
       if (currentLibType) detailParams.set('type', currentLibType);
       const detailLibrary = $('#libraryFilter').value.trim();
       if (detailLibrary) detailParams.set('library', detailLibrary);
-      const detailThreshold = $('#watchedThresholdInput').value.trim();
+      const detailThreshold = getWatchedThresholdSetting();
       if (detailThreshold) detailParams.set('threshold', detailThreshold);
       detailParams.set('return', window.location.pathname + window.location.search);
       const detailHref = '/item/' + encodeURIComponent(String(rk)) + '?' + detailParams.toString();
@@ -1291,6 +1332,8 @@
       let url;
       if (isCombined) {
         url = `/api/library/combined?type=${encodeURIComponent(typeParam)}&length=${PAGE_SIZE}&start=${page * PAGE_SIZE}&order_column=${apiSortCol}&order_dir=${apiSortDir}`;
+        const hiddenLibraries = getHiddenLibraryIds();
+        hiddenLibraries.forEach(id => { url += `&exclude_section_id=${encodeURIComponent(id)}`; });
         if (libraryFilter) url += `&library_name=${encodeURIComponent(libraryFilter)}`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
         // Optional: ?test_calculating=1 in page URL forces the "calculating file sizes" banner for testing
@@ -1375,7 +1418,7 @@
             body: JSON.stringify({
               rating_keys: ratingKeys,
               media_type: currentLibType || 'movie',
-              watched_threshold: $('#watchedThresholdInput').value.trim() || null,
+              watched_threshold: getWatchedThresholdSetting(),
             }),
           });
           const osrInfo = await parseJsonResponse(osrRes);
@@ -1436,6 +1479,26 @@
     } catch (e) {
       body.innerHTML = `<tr><td colspan="10"><div class="empty-state"><p>Error: ${esc(e.message)}</p></div></td></tr>`;
       toast('Failed to load media: ' + e.message, 'error');
+    }
+  }
+
+  function getHiddenLibraryIds() {
+    try {
+      const value = JSON.parse(localStorage.getItem('magic-erasarr-hidden-libraries') || '[]');
+      return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function getWatchedThresholdSetting() {
+    try {
+      const value = localStorage.getItem('magic-erasarr-watched-threshold');
+      if (value == null || value.trim() === '') return null;
+      const threshold = Number(value);
+      return Number.isFinite(threshold) && threshold >= 0 && threshold <= 100 ? value.trim() : null;
+    } catch (_) {
+      return null;
     }
   }
 

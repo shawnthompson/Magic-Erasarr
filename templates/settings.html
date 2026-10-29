@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings — Magic-Erasarr</title>
+<script>
+  (() => {
+    try {
+      const theme = localStorage.getItem('magic-erasarr-theme');
+      if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    } catch (_) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #181a24; --surface2: #1f2231; --border: #2a2d3e;
+    --text: #e2e4ed; --text-dim: #8b8fa3; --accent: #6366f1; --accent-hover: #818cf8;
+    --success: #22c55e; --warning: #f59e0b; --radius: 8px;
+  }
+  [data-theme="light"] {
+    --bg: #f5f7fb; --surface: #fff; --surface2: #e9edf5; --border: #cbd2df;
+    --text: #1f2937; --text-dim: #596579; --accent: #4f46e5; --accent-hover: #4338ca;
+    --success: #15803d; --warning: #b45309;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f5f7fb; --surface: #fff; --surface2: #e9edf5; --border: #cbd2df;
+      --text: #1f2937; --text-dim: #596579; --accent: #4f46e5; --accent-hover: #4338ca;
+      --success: #15803d; --warning: #b45309;
+    }
+  }
+  * { box-sizing: border-box; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  header a { color: var(--text-dim); text-decoration: none; }
+  header a:hover, header a:focus { color: var(--text); text-decoration: underline; }
+  :focus-visible { outline: 3px solid var(--accent-hover); outline-offset: 3px; }
+  main { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
+  .intro { color: var(--text-dim); margin: 0 0 1.5rem; }
+  .settings-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
+  h3 { font-size: .95rem; margin: 1.25rem 0 .5rem; }
+  .help { color: var(--text-dim); font-size: .875rem; line-height: 1.5; }
+  .theme-options { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+  .theme-options label { display: flex; align-items: center; gap: .45rem; cursor: pointer; }
+  input[type="radio"], input[type="checkbox"] { accent-color: var(--accent); width: 1rem; height: 1rem; }
+  .library-list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 1rem; }
+  .library-row { display: grid; grid-template-columns: 1fr 120px 110px; gap: 1rem; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid var(--border); }
+  .library-row:last-child { border-bottom: 0; }
+  .library-row.header { background: var(--surface2); color: var(--text-dim); font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .library-type, .library-id { color: var(--text-dim); font-size: .875rem; }
+  .library-visibility { display: flex; align-items: center; gap: .4rem; }
+  .empty, .error { padding: 1rem; color: var(--text-dim); }
+  .error { color: var(--warning); }
+  .actions { display: flex; align-items: center; gap: .75rem; margin-top: 1rem; }
+  button { border: 0; border-radius: var(--radius); padding: .55rem 1rem; background: var(--accent); color: #fff; cursor: pointer; font-size: .875rem; }
+  button:hover { background: var(--accent-hover); }
+  .status { color: var(--success); min-height: 1.25rem; font-size: .875rem; }
+  .integration-list { display: grid; gap: .65rem; margin-top: 1rem; }
+  .integration { display: grid; grid-template-columns: 1fr 1fr auto; gap: 1rem; align-items: center; padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius); }
+  .integration-url { color: var(--text-dim); overflow-wrap: anywhere; font-size: .875rem; }
+  .configured { color: var(--success); font-size: .875rem; }
+  .not-configured { color: var(--text-dim); font-size: .875rem; }
+  @media (max-width: 650px) {
+    header { padding: 1rem; }
+    main { padding: 1rem; }
+    .library-row { grid-template-columns: 1fr auto; }
+    .library-row.header { display: none; }
+    .library-type, .library-id { font-size: .8rem; }
+    .integration { grid-template-columns: 1fr; gap: .25rem; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Magic</span>-Erasarr</h1>
+  <a href="/">Back to library</a>
+</header>
+
+<main>
+  <h1>User settings</h1>
+  <p class="intro">Control which libraries appear in the dashboard and choose how Magic-Erasarr looks. These preferences are saved in this browser.</p>
+
+  <section class="settings-section" aria-labelledby="library-heading">
+    <h2 id="library-heading">Library visibility</h2>
+    <p class="help">Hidden libraries are excluded from combined Movies, TV Shows, and Music views. They remain listed here so you can show them again.</p>
+    <div id="libraryList" class="library-list" aria-live="polite">
+      <p class="empty">Loading libraries…</p>
+    </div>
+    <div class="actions">
+      <button type="button" id="saveLibraries">Save library visibility</button>
+      <button type="button" id="resetLibraries">Show all libraries</button>
+      <span id="libraryStatus" class="status" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="settings-section" aria-labelledby="appearance-heading">
+    <h2 id="appearance-heading">Appearance</h2>
+    <p class="help">System follows your device preference. Light and Dark override it for this browser.</p>
+    <fieldset class="theme-options">
+      <legend class="sr-only">Color theme</legend>
+      <label><input type="radio" name="theme" value="system"> System</label>
+      <label><input type="radio" name="theme" value="light"> Light</label>
+      <label><input type="radio" name="theme" value="dark"> Dark</label>
+    </fieldset>
+  </section>
+
+  <section class="settings-section" aria-labelledby="behavior-heading">
+    <h2 id="behavior-heading">Dashboard behavior</h2>
+    <p class="help">Set the completion percentage used when showing requester watch status. Leave this blank to use Tautulli’s configured movie threshold, or 85% when Tautulli does not provide one.</p>
+    <label for="watchedThresholdInput">Watched threshold (%)</label>
+    <input id="watchedThresholdInput" type="number" min="0" max="100" step="1" placeholder="Tautulli default" aria-describedby="watchedThresholdHelp">
+    <span id="watchedThresholdHelp" class="help">Enter a whole number from 0 to 100.</span>
+    <div class="actions">
+      <button type="button" id="saveThreshold">Save watched threshold</button>
+      <button type="button" id="resetThreshold">Use Tautulli default</button>
+      <span id="thresholdStatus" class="status" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="settings-section" aria-labelledby="integrations-heading">
+    <h2 id="integrations-heading">Integrations</h2>
+    <p class="help">API keys and tokens remain in your <code>.env</code> file or Docker environment. They are never displayed here. Restart the application after changing them.</p>
+    <div class="integration-list">
+      {% for integration in integrations %}
+      <div class="integration">
+        <strong>{{ integration.name }}</strong>
+        <span class="integration-url">{{ integration.url }}</span>
+        {% if integration.configured %}<span class="configured">Configured</span>{% else %}<span class="not-configured">Not configured</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="settings-section" aria-labelledby="about-heading">
+    <h2 id="about-heading">About</h2>
+    <p class="help">Magic-Erasarr version {{ version }}. See the <a href="{{ github_repo }}">project documentation</a> for setup and environment-variable details.</p>
+  </section>
+</main>
+
+<script>
+(() => {
+  const HIDDEN_KEY = 'magic-erasarr-hidden-libraries';
+  const THEME_KEY = 'magic-erasarr-theme';
+  const THRESHOLD_KEY = 'magic-erasarr-watched-threshold';
+  const list = document.getElementById('libraryList');
+  const status = document.getElementById('libraryStatus');
+  const thresholdInput = document.getElementById('watchedThresholdInput');
+  const thresholdStatus = document.getElementById('thresholdStatus');
+
+  function hiddenIds() {
+    try {
+      const value = JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]');
+      return new Set(Array.isArray(value) ? value.map(String) : []);
+    } catch (_) { return new Set(); }
+  }
+
+  function renderLibraries(libraries) {
+    if (!libraries.length) {
+      list.innerHTML = '<p class="empty">No Tautulli libraries were found.</p>';
+      return;
+    }
+    const hidden = hiddenIds();
+    list.innerHTML = `
+      <div class="library-row header" aria-hidden="true"><span>Library</span><span>Type</span><span>Visibility</span></div>
+      ${libraries.map((library, index) => {
+        const id = String(library.section_id ?? '');
+        const name = String(library.section_name || 'Unnamed library');
+        const type = String(library.section_type || 'unknown');
+        const inputId = `library-visible-${index}`;
+        return `<div class="library-row">
+          <span><label for="${inputId}">${escapeHtml(name)}</label></span>
+          <span class="library-type">${escapeHtml(type)}</span>
+          <span class="library-visibility"><input id="${inputId}" type="checkbox" data-section-id="${escapeHtml(id)}" ${hidden.has(id) ? '' : 'checked'}> <label for="${inputId}">Show</label></span>
+        </div>`;
+      }).join('')}`;
+  }
+
+  function escapeHtml(value) {
+    const element = document.createElement('span');
+    element.textContent = value;
+    return element.innerHTML;
+  }
+
+  async function loadLibraries() {
+    try {
+      const response = await fetch('/api/libraries');
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data)) throw new Error(data.error || 'Could not load libraries.');
+      renderLibraries(data);
+    } catch (error) {
+      list.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+    }
+  }
+
+  function applyTheme(theme) {
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    else delete document.documentElement.dataset.theme;
+  }
+
+  let savedTheme = 'system';
+  try { savedTheme = localStorage.getItem(THEME_KEY) || 'system'; } catch (_) {}
+  const themeInput = document.querySelector(`input[name="theme"][value="${savedTheme}"]`) || document.querySelector('input[name="theme"][value="system"]');
+  themeInput.checked = true;
+  document.querySelectorAll('input[name="theme"]').forEach(input => input.addEventListener('change', () => {
+    try { localStorage.setItem(THEME_KEY, input.value); } catch (_) {}
+    applyTheme(input.value);
+  }));
+
+  try {
+    const savedThreshold = localStorage.getItem(THRESHOLD_KEY);
+    if (savedThreshold != null) thresholdInput.value = savedThreshold;
+  } catch (_) {}
+
+  document.getElementById('saveThreshold').addEventListener('click', () => {
+    const value = thresholdInput.value.trim();
+    const numericValue = Number(value);
+    if (value !== '' && (!Number.isInteger(numericValue) || numericValue < 0 || numericValue > 100)) {
+      thresholdStatus.textContent = 'Enter a whole number from 0 to 100.';
+      return;
+    }
+    try {
+      if (value === '') localStorage.removeItem(THRESHOLD_KEY);
+      else localStorage.setItem(THRESHOLD_KEY, value);
+      thresholdStatus.textContent = value === '' ? 'Tautulli default restored.' : 'Watched threshold saved.';
+    } catch (_) {
+      thresholdStatus.textContent = 'Could not save browser preferences.';
+    }
+  });
+
+  document.getElementById('resetThreshold').addEventListener('click', () => {
+    thresholdInput.value = '';
+    try {
+      localStorage.removeItem(THRESHOLD_KEY);
+      thresholdStatus.textContent = 'Tautulli default restored.';
+    } catch (_) {
+      thresholdStatus.textContent = 'Could not reset browser preferences.';
+    }
+  });
+
+  document.getElementById('saveLibraries').addEventListener('click', () => {
+    const hidden = [...document.querySelectorAll('[data-section-id]')]
+      .filter(input => !input.checked)
+      .map(input => input.dataset.sectionId)
+      .filter(Boolean);
+    try {
+      localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden));
+      status.textContent = 'Library visibility saved.';
+    } catch (_) {
+      status.textContent = 'Could not save browser preferences.';
+    }
+  });
+
+  document.getElementById('resetLibraries').addEventListener('click', () => {
+    document.querySelectorAll('[data-section-id]').forEach(input => { input.checked = true; });
+    try {
+      localStorage.removeItem(HIDDEN_KEY);
+      status.textContent = 'All libraries will be shown.';
+    } catch (_) {
+      status.textContent = 'Could not reset browser preferences.';
+    }
+  });
+
+  loadLibraries();
+})();
+</script>
+</body>
+</html>

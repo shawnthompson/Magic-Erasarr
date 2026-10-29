@@ -4,14 +4,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Item details - Magic-Erasarr</title>
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem('magic-erasarr-theme');
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
   <style>
     :root { --bg:#0f1117; --surface:#181a24; --surface2:#1f2231; --border:#2a2d3e; --text:#e2e4ed; --dim:#8b8fa3; --accent:#818cf8; --danger:#f87171; --radius:8px; }
+    [data-theme="light"] { --bg:#f5f7fb; --surface:#fff; --surface2:#e9edf5; --border:#cbd2df; --text:#1f2937; --dim:#596579; --accent:#4f46e5; --danger:#dc2626; }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) { --bg:#f5f7fb; --surface:#fff; --surface2:#e9edf5; --border:#cbd2df; --text:#1f2937; --dim:#596579; --accent:#4f46e5; --danger:#dc2626; }
+    }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; line-height:1.5; }
     a { color:var(--accent); }
     a:focus-visible, button:focus-visible { outline:3px solid #facc15; outline-offset:3px; }
-    header { background:var(--surface); border-bottom:1px solid var(--border); padding:1rem 2rem; }
+    header { background:var(--surface); border-bottom:1px solid var(--border); padding:1rem 2rem; display:flex; justify-content:space-between; align-items:center; }
     header a { color:var(--text); text-decoration:none; font-weight:600; }
+    header a:last-child { color:var(--dim); font-weight:400; font-size:.875rem; }
     main { max-width:1100px; margin:0 auto; padding:1.5rem; }
     .back-link { display:inline-block; margin-bottom:1.5rem; }
     .hero { display:flex; gap:1.25rem; align-items:flex-start; margin-bottom:1.5rem; }
@@ -48,7 +61,7 @@
   </style>
 </head>
 <body>
-  <header><a href="/">Magic-Erasarr</a></header>
+  <header><a href="/">Magic-Erasarr</a><a href="/settings">Settings</a></header>
   <main>
     <a class="back-link" href="{{ return_url }}">Back to library</a>
     <div id="page" aria-live="polite">
@@ -60,7 +73,10 @@
     (() => {
       const ratingKey = {{ rating_key|tojson }};
       const returnUrl = {{ return_url|tojson }};
-      const watchedThreshold = new URLSearchParams(window.location.search).get('threshold') || null;
+      const urlThreshold = new URLSearchParams(window.location.search).get('threshold');
+      let savedThreshold = null;
+      try { savedThreshold = localStorage.getItem('magic-erasarr-watched-threshold'); } catch (_) {}
+      const watchedThreshold = urlThreshold || savedThreshold || null;
       const page = document.querySelector('#page');
       const posterUrl = '/api/item-poster?rating_key=' + encodeURIComponent(ratingKey);
 
