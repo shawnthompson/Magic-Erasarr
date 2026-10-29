@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Settings page** — Added `/settings` for browser-local library visibility, Light/Dark/System themes, watched-threshold preferences, integration status, and setup guidance.
+- **Configurable watched threshold** — Dashboard and item-detail requester status now use the saved Settings value, while blank settings retain Tautulli's configured threshold and 85% fallback behavior.
+
+### Changed
+
+- **Library visibility** — Combined library views can exclude selected Tautulli libraries by stable section ID.
+- **Credentials** — Settings reports integration configuration without exposing API keys or tokens; credentials remain environment-managed.
+- **Documentation** — README now documents the Settings page and its preferences.
+
+### Fixed
+
+- **Library visibility safety** — The visibility save control stays disabled until library discovery succeeds, preventing a failed or empty library load from clearing existing preferences.
+
 ## [1.11.0] - 2026-10-28
 
 ### Added
